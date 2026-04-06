@@ -1,4 +1,4 @@
-import com.android.build.api.variant.impl.VariantOutputImpl
+﻿import com.android.build.api.variant.impl.VariantOutputImpl
 
 val dnsjavaInetAddressResolverService = "META-INF/services/java.net.spi.InetAddressResolverProvider"
 
@@ -40,7 +40,7 @@ plugins {
 }
 
 android {
-    namespace = "ai.openclaw.app"
+    namespace = "clawberry.aiworm.cn"
     compileSdk = 36
 
     // Release signing is local-only; keep the keystore path and passwords out of the repo.
@@ -62,7 +62,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "ai.openclaw.app"
+        applicationId = "clawberry.aiworm.cn"
         minSdk = 30
         targetSdk = 36
         versionCode = 2026031400
@@ -201,7 +201,8 @@ dependencies {
     implementation("androidx.camera:camera-camera2:1.5.2")
     implementation("androidx.camera:camera-lifecycle:1.5.2")
     implementation("androidx.camera:camera-video:1.5.2")
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")  // reliable camera QR scan on all devices
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")  // static ML Kit for gallery image QR scan
 
     // Unicast DNS-SD (Wide-Area Bonjour) for tailnet discovery domains.
     implementation("dnsjava:dnsjava:3.6.4")

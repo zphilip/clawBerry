@@ -1,10 +1,10 @@
-plugins {
+﻿plugins {
     id("com.android.test")
     id("org.jlleitschuh.gradle.ktlint")
 }
 
 android {
-    namespace = "ai.openclaw.app.benchmark"
+    namespace = "clawberry.aiworm.cn.benchmark"
     compileSdk = 36
 
     defaultConfig {
