@@ -69,6 +69,13 @@ import clawberry.aiworm.cn.BuildConfig
 import clawberry.aiworm.cn.LocationMode
 import clawberry.aiworm.cn.MainViewModel
 import clawberry.aiworm.cn.node.DeviceNotificationListenerService
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.input.KeyboardType
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 
 @Composable
 fun SettingsSheet(viewModel: MainViewModel) {
@@ -260,6 +267,29 @@ fun SettingsSheet(viewModel: MainViewModel) {
       viewModel.refreshGatewayConnection()
     }
 
+  // ── ClawBoard state ──
+  var clawboardIp by rememberSaveable { mutableStateOf("") }
+  var clawboardPort by rememberSaveable { mutableStateOf("80") }
+
+  val clawboardQrLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+    val scanned = result.contents ?: return@rememberLauncherForActivityResult
+    if (scanned.startsWith("http://") || scanned.startsWith("https://")) {
+      runCatching {
+        val uri = Uri.parse(scanned)
+        clawboardIp = uri.host ?: ""
+        clawboardPort = if ((uri.port) > 0) uri.port.toString() else "80"
+      }
+    } else {
+      val colonIdx = scanned.lastIndexOf(':')
+      if (colonIdx > 0) {
+        clawboardIp = scanned.substring(0, colonIdx).trim()
+        clawboardPort = scanned.substring(colonIdx + 1).trim()
+      } else {
+        clawboardIp = scanned.trim()
+      }
+    }
+  }
+
   DisposableEffect(lifecycleOwner, context) {
     val observer =
       LifecycleEventObserver { _, event ->
@@ -362,10 +392,83 @@ fun SettingsSheet(viewModel: MainViewModel) {
           .fillMaxWidth()
           .fillMaxHeight()
           .imePadding()
-          .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
+          .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Bottom)),
       contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+      // ── ClawBoard ──
+      item {
+        Text(
+          "CLAWBOARD",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        Column(modifier = Modifier.settingsRowModifier()) {
+          OutlinedTextField(
+            value = clawboardIp,
+            onValueChange = { clawboardIp = it },
+            label = { Text("IP Address", style = mobileCaption1, color = mobileTextSecondary) },
+            placeholder = { Text("192.168.1.1", style = mobileBody, color = mobileTextTertiary) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            textStyle = mobileBody.copy(color = mobileText),
+            singleLine = true,
+            colors = settingsTextFieldColors(),
+          )
+          HorizontalDivider(color = mobileBorder)
+          OutlinedTextField(
+            value = clawboardPort,
+            onValueChange = { clawboardPort = it },
+            label = { Text("Port", style = mobileCaption1, color = mobileTextSecondary) },
+            placeholder = { Text("80", style = mobileBody, color = mobileTextTertiary) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            textStyle = mobileBody.copy(color = mobileText),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            colors = settingsTextFieldColors(),
+          )
+          HorizontalDivider(color = mobileBorder)
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Button(
+              onClick = {
+                val ip = clawboardIp.trim()
+                val port = clawboardPort.trim()
+                val url = if (port.isEmpty() || port == "80") "http://$ip" else "http://$ip:$port"
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+              },
+              enabled = clawboardIp.isNotBlank(),
+              colors = settingsPrimaryButtonColors(),
+              shape = RoundedCornerShape(14.dp),
+            ) {
+              Text("Open", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+            }
+            OutlinedButton(
+              onClick = {
+                clawboardQrLauncher.launch(
+                  ScanOptions().apply {
+                    setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                    setPrompt("Scan ClawBoard QR code")
+                    setBeepEnabled(false)
+                    setCaptureActivity(clawberry.aiworm.cn.PortraitCaptureActivity::class.java)
+                  }
+                )
+              },
+              shape = RoundedCornerShape(14.dp),
+              border = BorderStroke(1.dp, mobileAccent),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+            ) {
+              Text("Scan QR", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+            }
+          }
+        }
+      }
+
       // ── Network Discovery ──
       item {
         Text(

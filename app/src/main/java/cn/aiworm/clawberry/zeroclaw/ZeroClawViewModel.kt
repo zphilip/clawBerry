@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +27,7 @@ enum class ZcState {
   Pairing,
   Connecting,
   Connected,
+  Reconnecting,
   Error,
 }
 
@@ -47,15 +50,30 @@ data class ZcChatMessage(
 )
 
 // ---------------------------------------------------------------------------
+// Session picker state
+// ---------------------------------------------------------------------------
+sealed class ZcSessionPickerState {
+  data object Hidden : ZcSessionPickerState()
+  data class Choosing(val sessions: List<ZcSessionInfo>) : ZcSessionPickerState()
+  data object Restoring : ZcSessionPickerState()
+}
+
+// ---------------------------------------------------------------------------
 // ViewModel
 // ---------------------------------------------------------------------------
 class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
   private val prefs = app.getSharedPreferences("zeroclaw.direct", Context.MODE_PRIVATE)
   private val client = OkHttpClient.Builder()
-    .pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
+    .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+    .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+    .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)  // never timeout open WS
     .build()
   private val session = ZeroClawSession(client)
+
+  // Session ID is kept stable across reconnects so the server can restore
+  // conversation context.  Only reset when the user explicitly disconnects.
+  private var sessionId: String = UUID.randomUUID().toString()
 
   // --- Persisted connection settings ---
   val host = MutableStateFlow(prefs.getString("host", "10.0.2.2") ?: "10.0.2.2")
@@ -76,13 +94,22 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   private val _messages = MutableStateFlow<List<ZcChatMessage>>(emptyList())
   val messages: StateFlow<List<ZcChatMessage>> = _messages.asStateFlow()
 
+  private val _sessionPicker = MutableStateFlow<ZcSessionPickerState>(ZcSessionPickerState.Hidden)
+  val sessionPicker: StateFlow<ZcSessionPickerState> = _sessionPicker.asStateFlow()
+
   // --- Internal ---
   private var webSocket: okhttp3.WebSocket? = null
   private var streamingMsgId: String? = null
-  // Tracks deliberate disconnects so unexpected drops are shown as errors
+  // Tracks deliberate disconnects so unexpected drops trigger reconnect
   @Volatile private var wasUserDisconnect = false
   // When true, a reconnect is already in flight — don't transition to Idle on disconnect
   @Volatile private var pendingReconnect = false
+  // Auto-reconnect state
+  private var reconnectJob: Job? = null
+  private val _reconnectAttempt = MutableStateFlow(0)
+  val reconnectAttempt: StateFlow<Int> = _reconnectAttempt.asStateFlow()
+  private val maxReconnectAttempts = 8
+  private val reconnectBaseDelayMs = 2_000L
 
   // ---------------------------------------------------------------------------
   // Persisted setters
@@ -112,7 +139,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
           _state.value = ZcState.NeedsPairing
         } else {
           if (currentToken != null) _token.value = currentToken
-          openWebSocket()
+          fetchAndShowSessionPicker()
         }
       } catch (e: Exception) {
         _state.value = ZcState.Error
@@ -134,7 +161,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
         val tok = session.pair(host.value, port.value, code)
         _token.value = tok
         prefs.edit().putString("token", tok).apply()
-        openWebSocket()
+        fetchAndShowSessionPicker()
       } catch (e: Exception) {
         _state.value = ZcState.NeedsPairing
         _errorText.value = e.message ?: "Pairing failed"
@@ -143,11 +170,54 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   // ---------------------------------------------------------------------------
+  // Step 2b: fetch session list → show picker if history exists
+  // ---------------------------------------------------------------------------
+  private fun fetchAndShowSessionPicker() {
+    viewModelScope.launch(Dispatchers.IO) {
+      _state.value = ZcState.Connecting
+      try {
+        val sessions = session.fetchSessions(host.value, port.value, _token.value)
+        if (sessions.isEmpty()) {
+          openWebSocket()
+        } else {
+          _sessionPicker.value = ZcSessionPickerState.Choosing(sessions)
+          // openWebSocket() will be called from pickNewSession() or pickRestoreSession()
+        }
+      } catch (_: Exception) {
+        // Session API unavailable (older server version) — connect directly
+        openWebSocket()
+      }
+    }
+  }
+
+  /** User chose to start a brand-new session. */
+  fun pickNewSession() {
+    _sessionPicker.value = ZcSessionPickerState.Hidden
+    openWebSocket()
+  }
+
+  /** User chose to restore an old session — load its messages then open the WS. */
+  fun pickRestoreSession(info: ZcSessionInfo) {
+    viewModelScope.launch(Dispatchers.IO) {
+      _sessionPicker.value = ZcSessionPickerState.Restoring
+      try {
+        val msgs = session.fetchSessionMessages(host.value, port.value, _token.value, info.id)
+        sessionId = info.id
+        if (msgs.isNotEmpty()) _messages.value = msgs
+      } catch (_: Exception) {
+        // Failed to load history — keep the new sessionId and start fresh
+      }
+      _sessionPicker.value = ZcSessionPickerState.Hidden
+      openWebSocket()
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Step 3: open WebSocket to /ws/chat
   // ---------------------------------------------------------------------------
   private fun openWebSocket() {
     _state.value = ZcState.Connecting
-    webSocket = session.connectChat(host.value, port.value, _token.value) { event ->
+    webSocket = session.connectChat(host.value, port.value, _token.value, sessionId) { event ->
       handleEvent(event)
     }
   }
@@ -159,6 +229,9 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     when (event) {
       is ZcEvent.Connected -> {
         wasUserDisconnect = false
+        _reconnectAttempt.value = 0
+        reconnectJob?.cancel()
+        reconnectJob = null
         _errorText.value = null
         _state.value = ZcState.Connected
       }
@@ -205,13 +278,15 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
         _messages.update { it + ZcChatMessage(role = "assistant", content = event.content) }
       }
 
-      is ZcEvent.ToolCall ->
+      is ZcEvent.ToolCall -> {
         _messages.update {
           it + ZcChatMessage(role = "tool_call", content = "${event.name}(${event.args})")
         }
+      }
 
-      is ZcEvent.ToolResult ->
+      is ZcEvent.ToolResult -> {
         _messages.update { it + ZcChatMessage(role = "tool_result", content = event.output) }
+      }
 
       is ZcEvent.Unauthorized -> {
         // Token rejected — clear it and force re-pairing
@@ -233,23 +308,60 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
       }
 
       is ZcEvent.Disconnected -> {
-        streamingMsgId = null
-        webSocket = null
-        if (wasUserDisconnect) {
-          _errorText.value = null
-          if (!pendingReconnect) {
-            // Deliberate disconnect (not a stop-reconnect) — go back to setup
-            _state.value = ZcState.Idle
+        // Seal any partial streaming bubble so the user can see what arrived
+        val sid = streamingMsgId
+        if (sid != null) {
+          _messages.update { msgs ->
+            msgs.map { if (it.id == sid) it.copy(isStreaming = false) else it }
           }
-        } else {
-          // Unexpected — go to Error so user sees what happened
-          _state.value = ZcState.Error
-          if (_errorText.value == null) {
-            _errorText.value = "Disconnected from server"
-          }
+          streamingMsgId = null
         }
+        webSocket = null
+        val intentional = wasUserDisconnect
+        val isReconnect = pendingReconnect
         wasUserDisconnect = false
         pendingReconnect = false
+        when {
+          intentional && !isReconnect -> {
+            // User pressed Disconnect — go back to Idle
+            _errorText.value = null
+            _state.value = ZcState.Idle
+          }
+          intentional && isReconnect -> {
+            // stopStreaming() reconnect — openWebSocket() already called
+          }
+          _state.value == ZcState.NeedsPairing -> {
+            // Unauthorized already handled; don't overwrite NeedsPairing
+          }
+          else -> {
+            // Unexpected drop — auto-reconnect with backoff
+            scheduleReconnect()
+          }
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auto-reconnect with exponential backoff
+  // ---------------------------------------------------------------------------
+  private fun scheduleReconnect() {
+    if (_reconnectAttempt.value >= maxReconnectAttempts) {
+      _state.value = ZcState.Error
+      _errorText.value = "Connection lost after $maxReconnectAttempts attempts"
+      _reconnectAttempt.value = 0
+      return
+    }
+    _state.value = ZcState.Reconnecting
+    val delayMs = minOf(reconnectBaseDelayMs * (1L shl _reconnectAttempt.value), 30_000L)
+    reconnectJob?.cancel()
+    reconnectJob = viewModelScope.launch(Dispatchers.IO) {
+      delay(delayMs)
+      _reconnectAttempt.value++
+      try {
+        openWebSocket()
+      } catch (e: Exception) {
+        scheduleReconnect()
       }
     }
   }
@@ -274,9 +386,14 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   // Lifecycle
   // ---------------------------------------------------------------------------
   fun disconnect() {
+    reconnectJob?.cancel()
+    reconnectJob = null
+    _reconnectAttempt.value = 0
+    _sessionPicker.value = ZcSessionPickerState.Hidden
     wasUserDisconnect = true
     webSocket?.close(1000, "User disconnected")
     webSocket = null
+    sessionId = UUID.randomUUID().toString()  // fresh session on next connect
     _state.value = ZcState.Idle
     _errorText.value = null
     streamingMsgId = null
@@ -335,6 +452,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
   override fun onCleared() {
     super.onCleared()
+    reconnectJob?.cancel()
     webSocket?.cancel()
     webSocket = null
   }

@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,13 +79,22 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import clawberry.aiworm.cn.zeroclaw.ZcChatMessage
 import clawberry.aiworm.cn.zeroclaw.ZcImageAttachment
+import clawberry.aiworm.cn.zeroclaw.ZcSessionInfo
+import clawberry.aiworm.cn.zeroclaw.ZcSessionPickerState
 import clawberry.aiworm.cn.zeroclaw.ZcState
 import clawberry.aiworm.cn.zeroclaw.ZeroClawViewModel
 import clawberry.aiworm.cn.ui.chat.PendingImageAttachment
 import clawberry.aiworm.cn.ui.chat.loadSizedImageAttachment
+import clawberry.aiworm.cn.ui.chat.ChatMarkdown
+import clawberry.aiworm.cn.ui.chat.isLikelyHtml
 import clawberry.aiworm.cn.ui.chat.rememberBase64ImageState
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.DialogProperties
+import org.json.JSONObject
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -125,6 +135,7 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
     val token by viewModel.token.collectAsState()
     val pairCode by viewModel.pairCode.collectAsState()
     val tokenInput by viewModel.tokenInput.collectAsState()
+    val sessionPicker by viewModel.sessionPicker.collectAsState()
 
     var activeTab by rememberSaveable { mutableStateOf(ZcTab.Connect) }
 
@@ -134,6 +145,7 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
             ZcState.Connected -> activeTab = ZcTab.Chat
             ZcState.Idle, ZcState.Error ->
                 if (activeTab == ZcTab.Chat) activeTab = ZcTab.Connect
+            ZcState.Reconnecting -> Unit  // stay on current tab while reconnecting
             else -> Unit
         }
     }
@@ -196,6 +208,18 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
         }
 
     }
+
+    // ── Session picker + restoring dialogs ────────────────────────────────────
+    when (val picker = sessionPicker) {
+        is ZcSessionPickerState.Choosing ->
+            ZcSessionPickerDialog(
+                sessions = picker.sessions,
+                onPickNew = { viewModel.pickNewSession() },
+                onPickRestore = { viewModel.pickRestoreSession(it) },
+            )
+        ZcSessionPickerState.Restoring -> ZcRestoringDialog()
+        ZcSessionPickerState.Hidden -> Unit
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +253,13 @@ private fun ZcStatusBar(state: ZcState, host: String, port: Int) {
             textColor = mobileWarning
             bgColor = mobileWarningSoft
             borderColor = LocalMobileColors.current.chipBorderWarning
+        }
+        ZcState.Reconnecting -> {
+            label = "Reconnecting…"
+            dotColor = Color(0xFFFFA726)
+            textColor = Color(0xFFFFA726)
+            bgColor = Color(0xFFFFA726).copy(alpha = 0.12f)
+            borderColor = Color(0xFFFFA726).copy(alpha = 0.4f)
         }
         ZcState.Error -> {
             label = "Error"
@@ -313,6 +344,7 @@ private fun ZcConnectTab(
     errorText: String?,
     viewModel: ZeroClawViewModel,
 ) {
+    val reconnectAttempt by viewModel.reconnectAttempt.collectAsState()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -409,7 +441,7 @@ private fun ZcConnectTab(
                 }
             }
 
-            ZcState.HealthChecking, ZcState.Pairing, ZcState.Connecting -> {
+            ZcState.HealthChecking, ZcState.Pairing, ZcState.Connecting, ZcState.Reconnecting -> {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -418,7 +450,7 @@ private fun ZcConnectTab(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircularProgressIndicator(
-                        color = mobileAccent,
+                        color = if (state == ZcState.Reconnecting) Color(0xFFFFA726) else mobileAccent,
                         modifier = Modifier.size(22.dp),
                         strokeWidth = 2.5.dp,
                     )
@@ -427,10 +459,11 @@ private fun ZcConnectTab(
                         text = when (state) {
                             ZcState.HealthChecking -> "Checking gateway…"
                             ZcState.Pairing -> "Pairing…"
+                            ZcState.Reconnecting -> "Reconnecting… (attempt $reconnectAttempt)"
                             else -> "Connecting…"
                         },
                         style = mobileCallout,
-                        color = mobileTextSecondary,
+                        color = if (state == ZcState.Reconnecting) Color(0xFFFFA726) else mobileTextSecondary,
                     )
                 }
             }
@@ -572,6 +605,7 @@ private fun ZcInfoCard(
                             ZcState.NeedsPairing -> "Pairing required"
                             ZcState.Pairing -> "Pairing…"
                             ZcState.Connecting -> "Connecting…"
+                            ZcState.Reconnecting -> "Reconnecting…"
                             ZcState.Error -> "Error"
                             ZcState.Idle -> "Offline"
                         },
@@ -1163,6 +1197,26 @@ private fun ZcSettingsTab(
 }
 
 // ---------------------------------------------------------------------------
+// Helper: extract renderable HTML embedded inside a tool_call's JSON args.
+// Handles content like: canvas({"action":"render","content":"<!DOCTYPE html>..."})
+// JSONObject.getString() properly unescapes \n, \", etc.
+// ---------------------------------------------------------------------------
+private fun extractHtmlFromToolCallArgs(content: String): String? {
+    val braceStart = content.indexOf('{')
+    val braceEnd = content.lastIndexOf('}')
+    if (braceStart < 0 || braceEnd <= braceStart) return null
+    return try {
+        val json = JSONObject(content.substring(braceStart, braceEnd + 1))
+        json.keys().asSequence()
+            .mapNotNull { key ->
+                runCatching { json.getString(key) }.getOrNull()
+                    ?.takeIf { isLikelyHtml(it) }
+            }
+            .firstOrNull()
+    } catch (_: Exception) { null }
+}
+
+// ---------------------------------------------------------------------------
 // Message bubble – user / assistant / tool_call / tool_result / system_error
 // ---------------------------------------------------------------------------
 @Composable
@@ -1170,6 +1224,12 @@ private fun ZcMessageBubble(msg: ZcChatMessage) {
     val isUser = msg.role == "user"
     val isTool = msg.role == "tool_call" || msg.role == "tool_result"
     val isError = msg.role == "system_error"
+    // For tool_call: check once if args contain renderable HTML
+    val toolCallHtml = remember(msg.content) {
+        if (msg.role == "tool_call") extractHtmlFromToolCallArgs(msg.content) else null
+    }
+    var fullscreenImage by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    val onImageClick: (String, String?) -> Unit = { b64, mime -> fullscreenImage = b64 to mime }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1252,20 +1312,39 @@ private fun ZcMessageBubble(msg: ZcChatMessage) {
                     shape = RoundedCornerShape(10.dp),
                     color = mobileSurfaceStrong,
                     border = BorderStroke(1.dp, mobileBorder),
-                    modifier = Modifier.widthIn(max = 280.dp),
+                    modifier = if (msg.role == "tool_result" || toolCallHtml != null)
+                        Modifier.widthIn(max = 320.dp)
+                    else
+                        Modifier.widthIn(max = 280.dp),
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                         Text(
-                            text = if (msg.role == "tool_call") "⚙ tool call" else "✓ tool result",
+                            text = if (msg.role == "tool_call") "\u2699 tool call" else "\u2713 tool result",
                             style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
                             color = mobileTextTertiary,
                         )
                         Spacer(Modifier.height(2.dp))
-                        Text(
-                            msg.content,
-                            style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
-                            color = mobileTextSecondary,
-                        )
+                        if (msg.role == "tool_result") {
+                            // Tool results may contain markdown text or data: images
+                            ChatMarkdown(
+                                text = msg.content,
+                                textColor = mobileTextSecondary,
+                                onImageClick = onImageClick,
+                            )
+                        } else if (toolCallHtml != null) {
+                            // tool_call args contained an HTML payload — render it
+                            ChatMarkdown(
+                                text = toolCallHtml,
+                                textColor = mobileTextSecondary,
+                                onImageClick = onImageClick,
+                            )
+                        } else {
+                            Text(
+                                msg.content,
+                                style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
+                                color = mobileTextSecondary,
+                            )
+                        }
                     }
                 }
 
@@ -1294,18 +1373,33 @@ private fun ZcMessageBubble(msg: ZcChatMessage) {
                     color = mobileCardSurface,
                     border = BorderStroke(1.dp, mobileBorder),
                     modifier = Modifier
-                        .widthIn(max = 300.dp)
+                        .widthIn(max = 320.dp)
                         .alpha(pulseAlpha),
                 ) {
-                    Text(
-                        text = msg.content.ifEmpty { "…" },
-                        style = mobileBody,
-                        color = mobileText,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    )
+                    if (msg.isStreaming && msg.content.isEmpty()) {
+                        // Still waiting for first chunk — show ellipsis placeholder
+                        Text(
+                            text = "…",
+                            style = mobileBody,
+                            color = mobileText,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        )
+                    } else {
+                        // Full markdown renderer: handles bold/italic/code/tables/
+                        // inline images (data:image/...;base64,...) etc.
+                        ChatMarkdown(
+                            text = msg.content.ifEmpty { "…" },
+                            textColor = mobileText,
+                            onImageClick = onImageClick,
+                        )
+                    }
                 }
             }
         }
+    }
+    // Full-screen image viewer — shown when user taps any image in the bubble
+    fullscreenImage?.let { (base64, mimeType) ->
+        FullscreenImageDialog(base64 = base64, mimeType = mimeType, onDismiss = { fullscreenImage = null })
     }
 }
 
@@ -1348,4 +1442,190 @@ private fun ZcTextField(
             onNext = { onImeAction?.invoke() },
         ),
     )
+}
+
+// ---------------------------------------------------------------------------
+// Full-screen image viewer – tap anywhere to close
+// ---------------------------------------------------------------------------
+@Composable
+private fun FullscreenImageDialog(base64: String, mimeType: String?, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.94f))
+                .clickable { onDismiss() },
+        ) {
+            val isSvg = mimeType?.contains("svg", ignoreCase = true) == true
+            if (isSvg) {
+                val htmlSrc = remember(base64) {
+                    "<html><body style=\"margin:0;padding:0;background:#111\">" +
+                        "<img src=\"data:image/svg+xml;base64,$base64\" style=\"width:100%;height:auto\"/>" +
+                        "</body></html>"
+                }
+                AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.loadWithOverviewMode = true
+                            settings.useWideViewPort = true
+                            settings.javaScriptEnabled = false
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            loadData(htmlSrc, "text/html", "utf-8")
+                        }
+                    },
+                    update = { wv -> wv.loadData(htmlSrc, "text/html", "utf-8") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.Center),
+                )
+            } else {
+                val imageState = rememberBase64ImageState(base64)
+                imageState.image?.let { bitmap ->
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.Center),
+                    )
+                }
+            }
+            Text(
+                "Tap to close",
+                style = mobileCaption1,
+                color = Color.White.copy(alpha = 0.45f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp),
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session picker dialog – shown after health/pair, before WS opens
+// ---------------------------------------------------------------------------
+@Composable
+private fun ZcSessionPickerDialog(
+    sessions: List<ZcSessionInfo>,
+    onPickNew: () -> Unit,
+    onPickRestore: (ZcSessionInfo) -> Unit,
+) {
+    Dialog(onDismissRequest = onPickNew) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = mobileCardSurface,
+            border = BorderStroke(1.dp, mobileBorder),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                // Header
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Resume a session?", style = mobileTitle2, color = mobileText)
+                    Text(
+                        "Restore a previous conversation, or start fresh.",
+                        style = mobileCallout,
+                        color = mobileTextSecondary,
+                    )
+                }
+
+                // Session list
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 280.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(sessions) { info ->
+                        Surface(
+                            onClick = { onPickRestore(info) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = mobileSurface,
+                            border = BorderStroke(1.dp, mobileBorder),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Text(
+                                    "${info.messageCount} messages",
+                                    style = mobileCallout.copy(fontWeight = FontWeight.Medium),
+                                    color = mobileText,
+                                )
+                                if (info.lastActive.isNotBlank()) {
+                                    Text(
+                                        info.lastActive.take(19).replace('T', ' '),
+                                        style = mobileCaption1,
+                                        color = mobileTextSecondary,
+                                    )
+                                }
+                                if (info.preview.isNotBlank()) {
+                                    Text(
+                                        info.preview,
+                                        style = mobileCaption1,
+                                        color = mobileTextTertiary,
+                                        maxLines = 1,
+                                    )
+                                } else {
+                                    Text(
+                                        "ID: ${info.id.take(12)}…",
+                                        style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
+                                        color = mobileTextTertiary,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = mobileBorder)
+
+                // New session button
+                Button(
+                    onClick = onPickNew,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = mobileAccent,
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Text(
+                        "Start New Session",
+                        style = mobileHeadline.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZcRestoringDialog() {
+    Dialog(onDismissRequest = {}) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = mobileCardSurface,
+            border = BorderStroke(1.dp, mobileBorder),
+        ) {
+            Row(
+                modifier = Modifier.padding(24.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(
+                    color = mobileAccent,
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                )
+                Text("Restoring session history…", style = mobileCallout, color = mobileText)
+            }
+        }
+    }
 }

@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -100,11 +101,19 @@ import clawberry.aiworm.cn.picoclaw.PcImageAttachment
 import clawberry.aiworm.cn.picoclaw.PcMode
 import clawberry.aiworm.cn.picoclaw.PcState
 import clawberry.aiworm.cn.picoclaw.PicoClawViewModel
+import clawberry.aiworm.cn.ui.chat.ChatMarkdown
 import clawberry.aiworm.cn.ui.chat.PendingImageAttachment
 import clawberry.aiworm.cn.ui.chat.loadSizedImageAttachment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import clawberry.aiworm.cn.ui.chat.rememberBase64ImageState
 
 // ---------------------------------------------------------------------------
 // Sub-tab enum
@@ -204,7 +213,9 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                 onSelect = { activeTab = it },
                 icon = { tab -> tab.icon },
                 label = { tab -> tab.label },
-                modifier = Modifier.align(Alignment.BottomEnd),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = if (activeTab == PcTab.Chat) 72.dp else 0.dp),
             )
         }
     }
@@ -971,6 +982,8 @@ private fun PcChatTab(
     val attachments = remember { mutableStateListOf<PendingImageAttachment>() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var fullscreenImage by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    val onImageClick: (String, String?) -> Unit = { b64, mime -> fullscreenImage = b64 to mime }
     val resolver = context.contentResolver
     val listState = rememberLazyListState()
 
@@ -997,7 +1010,7 @@ private fun PcChatTab(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(messages, key = { it.id }) { msg ->
-                PcMessageBubble(msg = msg)
+                PcMessageBubble(msg = msg, onImageClick = onImageClick)
             }
         }
         HorizontalDivider(color = mobileBorder, thickness = 0.5.dp)
@@ -1014,13 +1027,16 @@ private fun PcChatTab(
             },
         )
     }
+    fullscreenImage?.let { (base64, mimeType) ->
+        PcFullscreenImageDialog(base64 = base64, mimeType = mimeType, onDismiss = { fullscreenImage = null })
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Message bubble
 // ---------------------------------------------------------------------------
 @Composable
-private fun PcMessageBubble(msg: PcChatMessage) {
+private fun PcMessageBubble(msg: PcChatMessage, onImageClick: (String, String?) -> Unit) {
     when (msg.role) {
         "user" -> {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1029,29 +1045,32 @@ private fun PcMessageBubble(msg: PcChatMessage) {
                     shape = RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
                     color = mobileAccent,
                 ) {
-                    Text(
-                        text = msg.content,
-                        color = Color.White,
-                        style = mobileBody,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    )
+                    SelectionContainer {
+                        Text(
+                            text = msg.content,
+                            color = Color.White,
+                            style = mobileBody,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        )
+                    }
                 }
             }
         }
         "assistant" -> {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
                 Surface(
-                    modifier = Modifier.widthIn(max = 280.dp),
+                    modifier = Modifier.widthIn(max = 320.dp),
                     shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
                     color = mobileCardSurface,
                     border = BorderStroke(1.dp, mobileBorder),
                 ) {
-                    Text(
-                        text = msg.content,
-                        color = mobileText,
-                        style = mobileBody,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    )
+                    Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        ChatMarkdown(
+                            text = msg.content,
+                            textColor = mobileText,
+                            onImageClick = onImageClick,
+                        )
+                    }
                 }
             }
         }
@@ -1452,6 +1471,68 @@ private fun PcActionButton(
         Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(modifier = Modifier.width(8.dp))
         Text(text = label, style = mobileCallout.copy(fontWeight = FontWeight.SemiBold))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fullscreen image dialog
+// ---------------------------------------------------------------------------
+@Composable
+private fun PcFullscreenImageDialog(base64: String, mimeType: String?, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.94f))
+                .clickable { onDismiss() },
+        ) {
+            val isSvg = mimeType?.contains("svg", ignoreCase = true) == true
+            if (isSvg) {
+                val htmlSrc = remember(base64) {
+                    "<html><body style=\"margin:0;padding:0;background:#111\">" +
+                        "<img src=\"data:image/svg+xml;base64,$base64\" style=\"width:100%;height:auto\"/>" +
+                        "</body></html>"
+                }
+                AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.loadWithOverviewMode = true
+                            settings.useWideViewPort = true
+                            settings.javaScriptEnabled = false
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            loadData(htmlSrc, "text/html", "utf-8")
+                        }
+                    },
+                    update = { wv -> wv.loadData(htmlSrc, "text/html", "utf-8") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.Center),
+                )
+            } else {
+                val imageState = rememberBase64ImageState(base64)
+                imageState.image?.let { bitmap ->
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.Center),
+                    )
+                }
+            }
+            Text(
+                "Tap to close",
+                style = mobileCaption1,
+                color = Color.White.copy(alpha = 0.45f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp),
+            )
+        }
     }
 }
 

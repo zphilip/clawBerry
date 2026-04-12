@@ -4,6 +4,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
@@ -55,6 +57,13 @@ sealed class ZcEvent {
 data class ZcHealth(
   val requirePairing: Boolean,
   val paired: Boolean,
+)
+
+data class ZcSessionInfo(
+  val id: String,
+  val lastActive: String,
+  val messageCount: Int,
+  val preview: String,
 )
 
 /**
@@ -141,9 +150,10 @@ class ZeroClawSession(private val client: OkHttpClient) {
     host: String,
     port: Int,
     token: String?,
+    sessionId: String,
     onEvent: (ZcEvent) -> Unit,
   ): WebSocket {
-    val sessionId = UUID.randomUUID().toString()
+    // sessionId is supplied by the caller and kept stable across reconnects
     val params = buildString {
       if (!token.isNullOrBlank()) {
         append("token=")
@@ -217,13 +227,89 @@ class ZeroClawSession(private val client: OkHttpClient) {
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
           val code = response?.code
           if (code == 401 || code == 403) {
+            // Unauthorized: emit Unauthorized only — the Disconnected state
+            // is implied and handled inside Unauthorized handler in the ViewModel
             onEvent(ZcEvent.Unauthorized)
+            onEvent(ZcEvent.Disconnected)  // still needed to null out webSocket
           } else {
             onEvent(ZcEvent.Errored(t.message ?: "Connection failed"))
+            onEvent(ZcEvent.Disconnected)
           }
-          onEvent(ZcEvent.Disconnected)
         }
       },
     )
   }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/sessions  — list all stored sessions
+  // ---------------------------------------------------------------------------
+  suspend fun fetchSessions(host: String, port: Int, token: String?): List<ZcSessionInfo> =
+    suspendCancellableCoroutine { cont ->
+      val reqBuilder = Request.Builder().url("http://$host:$port/api/sessions").get()
+      if (!token.isNullOrBlank()) reqBuilder.header("Authorization", "Bearer $token")
+      val call = client.newCall(reqBuilder.build())
+      cont.invokeOnCancellation { call.cancel() }
+      call.enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+
+        override fun onResponse(call: Call, response: Response) {
+          try {
+            if (!response.isSuccessful) { cont.resume(emptyList()); return }
+            val body = response.body?.string() ?: "[]"
+            val arr = json.parseToJsonElement(body).jsonArray
+            val list = arr.mapNotNull { el ->
+              val obj = runCatching { el.jsonObject }.getOrNull() ?: return@mapNotNull null
+              val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+              ZcSessionInfo(
+                id = id,
+                lastActive = obj["last_active"]?.jsonPrimitive?.contentOrNull ?: "",
+                messageCount = obj["message_count"]?.jsonPrimitive?.intOrNull ?: 0,
+                preview = obj["preview"]?.jsonPrimitive?.contentOrNull ?: "",
+              )
+            }
+            cont.resume(list)
+          } catch (_: Exception) {
+            cont.resume(emptyList())
+          }
+        }
+      })
+    }
+
+  // ---------------------------------------------------------------------------
+  // GET /api/sessions/{id}/messages  — retrieve stored messages for a session
+  // ---------------------------------------------------------------------------
+  suspend fun fetchSessionMessages(
+    host: String,
+    port: Int,
+    token: String?,
+    sessionId: String,
+  ): List<ZcChatMessage> =
+    suspendCancellableCoroutine { cont ->
+      val reqBuilder = Request.Builder()
+        .url("http://$host:$port/api/sessions/$sessionId/messages")
+        .get()
+      if (!token.isNullOrBlank()) reqBuilder.header("Authorization", "Bearer $token")
+      val call = client.newCall(reqBuilder.build())
+      cont.invokeOnCancellation { call.cancel() }
+      call.enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+
+        override fun onResponse(call: Call, response: Response) {
+          try {
+            if (!response.isSuccessful) { cont.resume(emptyList()); return }
+            val body = response.body?.string() ?: "[]"
+            val arr = json.parseToJsonElement(body).jsonArray
+            val list = arr.mapNotNull { el ->
+              val obj = runCatching { el.jsonObject }.getOrNull() ?: return@mapNotNull null
+              val role = obj["role"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+              val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: ""
+              ZcChatMessage(role = role, content = content)
+            }
+            cont.resume(list)
+          } catch (_: Exception) {
+            cont.resume(emptyList())
+          }
+        }
+      })
+    }
 }

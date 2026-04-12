@@ -63,7 +63,6 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("picoclaw.direct", Context.MODE_PRIVATE)
     private val client = OkHttpClient.Builder()
-        .pingInterval(15, TimeUnit.SECONDS)   // frequent pings to keep NAT/proxy alive
         .connectTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS)      // no read timeout — WS stays open indefinitely

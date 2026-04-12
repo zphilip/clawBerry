@@ -3,6 +3,7 @@
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,28 +13,35 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import clawberry.aiworm.cn.ui.mobileAccent
 import clawberry.aiworm.cn.ui.mobileCallout
 import clawberry.aiworm.cn.ui.mobileCaption1
@@ -76,7 +84,52 @@ import org.commonmark.node.ThematicBreak
 import org.commonmark.parser.Parser
 
 private const val LIST_INDENT_DP = 14
-private val dataImageRegex = Regex("^data:image/([a-zA-Z0-9+.-]+);base64,([A-Za-z0-9+/=\\n\\r]+)$")
+
+// LLMs sometimes split the base64 payload across multiple lines inside
+// the data: URI.  CommonMark doesn't allow line-endings in unbracketed
+// link destinations, so the whole ![alt](data:image/...) becomes plain
+// text.  We collapse whitespace inside data: URIs BEFORE parsing.
+private val dataUriInMarkdownRegex = Regex(
+  """!\[([^\]]*)\]\s*\(\s*(data:image/[^)]*?)\s*\)""",
+  setOf(RegexOption.DOT_MATCHES_ALL),
+)
+private fun normalizeDataUris(text: String): String =
+  dataUriInMarkdownRegex.replace(text) { mr ->
+    val alt = mr.groupValues[1]
+    val url = mr.groupValues[2].replace(Regex("\\s+"), "")
+    "![$alt]($url)"
+  }
+
+// Accepts standard (+/=) and URL-safe (-_) base64 variants
+private val dataImageRegex = Regex("^data:image/([a-zA-Z0-9+.-]+);base64,([A-Za-z0-9+/=_-]+)$")
+
+// Bare data URI: entire string (possibly with whitespace/newlines in base64 payload)
+// is just a data: URI with no markdown wrapper.
+private val bareDataUriRegex = Regex("^data:image/[a-zA-Z0-9+.-]+;base64,", RegexOption.IGNORE_CASE)
+
+/** Collapse whitespace and wrap a bare data URI line as a markdown image. */
+private fun normalizeBareDataUri(text: String): String? {
+  val t = text.trim()
+  if (!bareDataUriRegex.containsMatchIn(t)) return null
+  val flat = t.replace(Regex("\\s+"), "")
+  return "![image]($flat)"
+}
+
+/**
+ * Returns true when the text looks like an HTML document or fragment.
+ * Used to short-circuit the markdown parser and hand off to WebView.
+ */
+internal fun isLikelyHtml(text: String): Boolean {
+  val t = text.trimStart()
+  if (t.startsWith("<!DOCTYPE", ignoreCase = true)) return true
+  if (t.contains("<html", ignoreCase = true)) return true
+  if (!t.startsWith("<")) return false
+  val markers = listOf("<head", "<body", "<style", "<script", "<meta", "<div", "<table")
+  return markers.count { t.contains(it, ignoreCase = true) } >= 2
+}
+
+// CompositionLocal carrying the tap-to-fullscreen handler down to image nodes
+private val LocalImageClickHandler = compositionLocalOf<((String, String?) -> Unit)?> { null }
 
 private val markdownParser: Parser by lazy {
   val extensions: List<Extension> =
@@ -92,17 +145,41 @@ private val markdownParser: Parser by lazy {
 }
 
 @Composable
-fun ChatMarkdown(text: String, textColor: Color) {
-  val document = remember(text) { markdownParser.parse(text) as Document }
+fun ChatMarkdown(text: String, textColor: Color, onImageClick: ((String, String?) -> Unit)? = null) {
+  // Fast-path: entire content is HTML → render in WebView
+  val isHtml = remember(text) { isLikelyHtml(text) }
+  if (isHtml) {
+    HtmlWebView(html = text)
+    return
+  }
+
+  // Fast-path: entire content is a bare data URI (server returned raw image data)
+  val asBareImage = remember(text) { normalizeBareDataUri(text) }
+  if (asBareImage != null) {
+    val parsed = remember(asBareImage) { parseDataImageDestination(asBareImage.removePrefix("![image](").removeSuffix(")")) }
+    if (parsed != null) {
+      CompositionLocalProvider(LocalImageClickHandler provides onImageClick) {
+        InlineBase64Image(base64 = parsed.base64, mimeType = parsed.mimeType)
+      }
+      return
+    }
+  }
+
+  val normalized = remember(text) { normalizeDataUris(text) }
+  val document = remember(normalized) { markdownParser.parse(normalized) as Document }
   val inlineStyles = InlineStyles(inlineCodeBg = mobileCodeBg, inlineCodeColor = mobileCodeText, linkColor = mobileAccent, baseCallout = mobileCallout)
 
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    RenderMarkdownBlocks(
-      start = document.firstChild,
-      textColor = textColor,
-      inlineStyles = inlineStyles,
-      listDepth = 0,
-    )
+  CompositionLocalProvider(LocalImageClickHandler provides onImageClick) {
+    SelectionContainer {
+      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        RenderMarkdownBlocks(
+          start = document.firstChild,
+          textColor = textColor,
+          inlineStyles = inlineStyles,
+          listDepth = 0,
+        )
+      }
+    }
   }
 }
 
@@ -200,11 +277,7 @@ private fun RenderMarkdownBlocks(
       is HtmlBlock -> {
         val literal = current.literal.orEmpty().trim()
         if (literal.isNotEmpty()) {
-          Text(
-            text = literal,
-            style = mobileCallout.copy(fontFamily = FontFamily.Monospace),
-            color = textColor,
-          )
+          HtmlWebView(html = literal)
         }
       }
     }
@@ -461,11 +534,11 @@ private fun AnnotatedString.Builder.appendInlineNode(
         }
       }
       is Link -> {
-        withStyle(
-          SpanStyle(
-            color = linkColor,
-            textDecoration = TextDecoration.Underline,
-          ),
+        withLink(
+          LinkAnnotation.Url(
+            url = current.destination.orEmpty(),
+            styles = TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)),
+          )
         ) {
           appendInlineNode(current.firstChild, inlineCodeBg = inlineCodeBg, inlineCodeColor = inlineCodeColor, linkColor = linkColor)
         }
@@ -549,13 +622,75 @@ private data class ParsedDataImage(
 )
 
 @Composable
+internal fun HtmlWebView(html: String) {
+  // Wrap bare HTML fragments in a minimal document so WebView renders fonts/colours correctly.
+  val fullHtml = remember(html) {
+    if (html.contains("<html", ignoreCase = true) || html.contains("<!DOCTYPE", ignoreCase = true)) {
+      html
+    } else {
+      """<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:8px;padding:0;font-family:sans-serif;font-size:14px;word-break:break-word;}</style>
+</head><body>$html</body></html>"""
+    }
+  }
+  AndroidView(
+    factory = { ctx ->
+      android.webkit.WebView(ctx).apply {
+        settings.javaScriptEnabled = false
+        settings.loadWithOverviewMode = true
+        settings.useWideViewPort = true
+        settings.setSupportZoom(false)
+        isScrollContainer = true
+        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        loadDataWithBaseURL(null, fullHtml, "text/html", "utf-8", null)
+      }
+    },
+    update = { wv -> wv.loadDataWithBaseURL(null, fullHtml, "text/html", "utf-8", null) },
+    modifier = Modifier
+      .fillMaxWidth()
+      .heightIn(min = 60.dp, max = 560.dp),
+  )
+}
+
+@Composable
 private fun InlineBase64Image(base64: String, mimeType: String?) {
+  val isSvg = mimeType?.contains("svg", ignoreCase = true) == true
+
+  if (isSvg) {
+    // BitmapFactory cannot decode SVG — use a lightweight WebView instead.
+    val htmlSrc = remember(base64) {
+      "<html><body style=\"margin:0;padding:0;background:transparent\">" +
+        "<img src=\"data:image/svg+xml;base64,$base64\" style=\"width:100%;height:auto\"/>" +
+        "</body></html>"
+    }
+    AndroidView(
+      factory = { ctx ->
+        android.webkit.WebView(ctx).apply {
+          settings.loadWithOverviewMode = true
+          settings.useWideViewPort = true
+          settings.javaScriptEnabled = false
+          isScrollContainer = false
+          setBackgroundColor(android.graphics.Color.TRANSPARENT)
+          loadData(htmlSrc, "text/html", "utf-8")
+        }
+      },
+      update = { wv -> wv.loadData(htmlSrc, "text/html", "utf-8") },
+      modifier = Modifier
+        .fillMaxWidth()
+        .heightIn(min = 80.dp, max = 480.dp),
+    )
+    return
+  }
+
+  // Raster (PNG, JPEG, WebP, etc.) — decode via BitmapFactory
   val imageState = rememberBase64ImageState(base64)
   val image = imageState.image
 
   if (image != null) {
     Image(
-      bitmap = image!!,
+      bitmap = image,
       contentDescription = mimeType ?: "image",
       contentScale = ContentScale.Fit,
       modifier = Modifier.fillMaxWidth(),
