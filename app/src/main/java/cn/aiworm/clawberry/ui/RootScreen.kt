@@ -32,23 +32,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import clawberry.aiworm.cn.R
 import clawberry.aiworm.cn.MainViewModel
 import clawberry.aiworm.cn.picoclaw.PicoClawViewModel
 import clawberry.aiworm.cn.zeroclaw.ZeroClawViewModel
 
 private enum class RootTab(
-  val label: String,
+  @param:StringRes val labelRes: Int,
   val iconRes: Int,
   val tinted: Boolean = false,  // true → apply tint; false → render full colour
 ) {
-  OpenClaw(label = "OpenClaw",  iconRes = R.drawable.ic_openclaw,  tinted = false),
-  ZeroClaw(label = "ZeroClaw",  iconRes = R.drawable.ic_zeroclaw,  tinted = false),
-  PicoClaw(label = "PicoClaw",  iconRes = R.drawable.ic_picoclaw,  tinted = false),
-  Settings(label = "Settings",  iconRes = R.drawable.ic_settings_tab, tinted = true),
+  OpenClaw(labelRes = R.string.tab_openclaw,  iconRes = R.drawable.ic_openclaw,  tinted = false),
+  ZeroClaw(labelRes = R.string.tab_zeroclaw,  iconRes = R.drawable.ic_zeroclaw,  tinted = false),
+  PicoClaw(labelRes = R.string.tab_picoclaw,  iconRes = R.drawable.ic_picoclaw,  tinted = false),
+  Settings(labelRes = R.string.tab_settings,  iconRes = R.drawable.ic_settings_tab, tinted = true),
 }
 
 @Composable
@@ -133,6 +135,7 @@ private fun RootTabBar(
     ) {
       RootTab.entries.forEach { tab ->
         val active = tab == activeRoot
+        val tabLabel = stringResource(tab.labelRes)
         Surface(
           onClick = { onSelect(tab) },
           modifier = Modifier.weight(1f).heightIn(min = 52.dp),
@@ -149,13 +152,13 @@ private fun RootTabBar(
             val iconTint = if (active) mobileAccent else mobileTextTertiary
             Icon(
               painter = painterResource(id = tab.iconRes),
-              contentDescription = tab.label,
+              contentDescription = tabLabel,
               tint = if (tab.tinted) iconTint else Color.Unspecified,
               modifier = Modifier.size(24.dp),
             )
             if (active) {
               Text(
-                text = tab.label,
+                text = tabLabel,
                 color = mobileAccent,
                 style = mobileCaption1.copy(fontWeight = FontWeight.Bold),
                 maxLines = 1,

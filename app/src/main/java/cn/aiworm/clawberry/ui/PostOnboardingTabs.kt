@@ -48,19 +48,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import clawberry.aiworm.cn.MainViewModel
 import clawberry.aiworm.cn.zeroclaw.ZeroClawViewModel
 
 private enum class HomeTab(
-  val label: String,
+  val labelRes: Int,
   val icon: ImageVector,
 ) {
-  Connect(label = "Connect", icon = Icons.Default.CheckCircle),
-  Chat(label = "Chat", icon = Icons.Default.ChatBubble),
-  Voice(label = "Voice", icon = Icons.Default.RecordVoiceOver),
-  Screen(label = "Screen", icon = Icons.AutoMirrored.Filled.ScreenShare),
+  Connect(labelRes = R.string.common_connect, icon = Icons.Default.CheckCircle),
+  Chat(labelRes = R.string.common_chat, icon = Icons.Default.ChatBubble),
+  Voice(labelRes = R.string.common_voice, icon = Icons.Default.RecordVoiceOver),
+  Screen(labelRes = R.string.common_screen, icon = Icons.AutoMirrored.Filled.ScreenShare),
 }
 
 private enum class StatusVisual {
@@ -86,6 +87,10 @@ fun PostOnboardingTabs(
 
   val statusText by viewModel.statusText.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
+  val tabConnectLabel = stringResource(R.string.common_connect)
+  val tabChatLabel = stringResource(R.string.common_chat)
+  val tabVoiceLabel = stringResource(R.string.common_voice)
+  val tabScreenLabel = stringResource(R.string.common_screen)
 
   val statusVisual =
     remember(statusText, isConnected) {
@@ -134,7 +139,14 @@ fun PostOnboardingTabs(
           activeTab = activeTab,
           onSelect = { activeTab = it },
           icon = { tab -> tab.icon },
-          label = { tab -> tab.label },
+          label = { tab ->
+            when (tab) {
+              HomeTab.Connect -> tabConnectLabel
+              HomeTab.Chat -> tabChatLabel
+              HomeTab.Voice -> tabVoiceLabel
+              HomeTab.Screen -> tabScreenLabel
+            }
+          },
           modifier = Modifier.align(Alignment.BottomEnd),
         )
       }
@@ -247,7 +259,7 @@ private fun TopStatusBar(
             Box(modifier = Modifier.padding(4.dp))
           }
           Text(
-            text = statusText.trim().ifEmpty { "Offline" },
+            text = statusText.trim().ifEmpty { stringResource(R.string.common_offline) },
             style = mobileCaption1,
             color = chipText,
             maxLines = 1,

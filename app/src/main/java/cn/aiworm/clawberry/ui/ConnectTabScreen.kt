@@ -47,12 +47,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import clawberry.aiworm.cn.MainViewModel
+import clawberry.aiworm.cn.R
 import clawberry.aiworm.cn.ui.mobileCardSurface
 
 private enum class ConnectInputMode {
@@ -63,6 +65,7 @@ private enum class ConnectInputMode {
 @Composable
 fun ConnectTabScreen(viewModel: MainViewModel) {
   val context = LocalContext.current
+  val notSet = stringResource(R.string.openclaw_not_set)
   val statusText by viewModel.statusText.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
   val remoteAddress by viewModel.remoteAddress.collectAsState()
@@ -96,10 +99,10 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
     AlertDialog(
       onDismissRequest = { viewModel.declineGatewayTrustPrompt() },
       containerColor = mobileCardSurface,
-      title = { Text("Trust this gateway?", style = mobileHeadline, color = mobileText) },
+      title = { Text(stringResource(R.string.openclaw_gateway_trust_title), style = mobileHeadline, color = mobileText) },
       text = {
         Text(
-          "First-time TLS connection.\n\nVerify this SHA-256 fingerprint before trusting:\n${prompt.fingerprintSha256}",
+          stringResource(R.string.openclaw_gateway_trust_message, prompt.fingerprintSha256),
           style = mobileCallout,
           color = mobileText,
         )
@@ -109,7 +112,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           onClick = { viewModel.acceptGatewayTrustPrompt() },
           colors = ButtonDefaults.textButtonColors(contentColor = mobileAccent),
         ) {
-          Text("Trust and continue")
+          Text(stringResource(R.string.openclaw_trust_continue))
         }
       },
       dismissButton = {
@@ -117,7 +120,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           onClick = { viewModel.declineGatewayTrustPrompt() },
           colors = ButtonDefaults.textButtonColors(contentColor = mobileTextSecondary),
         ) {
-          Text("Cancel")
+          Text(stringResource(R.string.common_cancel))
         }
       },
     )
@@ -132,8 +135,8 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
     remember(isConnected, remoteAddress, setupResolvedEndpoint, manualResolvedEndpoint, inputMode) {
       when {
         isConnected && !remoteAddress.isNullOrBlank() -> remoteAddress!!
-        inputMode == ConnectInputMode.SetupCode -> setupResolvedEndpoint ?: "Not set"
-        else -> manualResolvedEndpoint ?: "Not set"
+        inputMode == ConnectInputMode.SetupCode -> setupResolvedEndpoint ?: notSet
+        else -> manualResolvedEndpoint ?: notSet
       }
     }
 
@@ -145,9 +148,9 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
     verticalArrangement = Arrangement.spacedBy(14.dp),
   ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-      Text("Gateway Connection", style = mobileTitle1, color = mobileText)
+      Text(stringResource(R.string.openclaw_gateway_connection), style = mobileTitle1, color = mobileText)
       Text(
-        if (isConnected) "Your gateway is active and ready." else "Connect to your gateway to get started.",
+        if (isConnected) stringResource(R.string.openclaw_gateway_active_ready) else stringResource(R.string.openclaw_connect_to_gateway),
         style = mobileCallout,
         color = mobileTextSecondary,
       )
@@ -178,7 +181,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
             )
           }
           Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Endpoint", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Text(stringResource(R.string.common_endpoint), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             Text(activeEndpoint, style = mobileBody.copy(fontFamily = FontFamily.Monospace), color = mobileText)
           }
         }
@@ -200,7 +203,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
             )
           }
           Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Status", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Text(stringResource(R.string.common_status), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             Text(statusText, style = mobileBody, color = if (isConnected) mobileSuccess else mobileText)
           }
         }
@@ -225,7 +228,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
       ) {
         Icon(Icons.Default.PowerSettingsNew, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(modifier = Modifier.width(8.dp))
-        Text("Disconnect", style = mobileHeadline.copy(fontWeight = FontWeight.SemiBold))
+        Text(stringResource(R.string.common_disconnect_action), style = mobileHeadline.copy(fontWeight = FontWeight.SemiBold))
       }
     } else {
       Button(
@@ -250,9 +253,9 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           if (config == null) {
             validationText =
               if (inputMode == ConnectInputMode.SetupCode) {
-                "Paste a valid setup code to connect."
+                context.getString(R.string.openclaw_invalid_setup_code)
               } else {
-                "Enter a valid manual host and port to connect."
+                context.getString(R.string.openclaw_invalid_manual_host_port)
               }
             return@Button
           }
@@ -279,7 +282,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
             contentColor = Color.White,
           ),
       ) {
-        Text("Connect Gateway", style = mobileHeadline.copy(fontWeight = FontWeight.Bold))
+        Text(stringResource(R.string.openclaw_connect_gateway), style = mobileHeadline.copy(fontWeight = FontWeight.Bold))
       }
     }
 
@@ -294,9 +297,9 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
           verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-          Text("Last gateway error", style = mobileHeadline, color = mobileWarning)
+          Text(stringResource(R.string.openclaw_last_gateway_error), style = mobileHeadline, color = mobileWarning)
           Text(statusLabel, style = mobileBody.copy(fontFamily = FontFamily.Monospace), color = mobileText)
-          Text("OpenClaw Android ${openClawAndroidVersionLabel()}", style = mobileCaption1, color = mobileTextSecondary)
+          Text(stringResource(R.string.openclaw_android_version, openClawAndroidVersionLabel()), style = mobileCaption1, color = mobileTextSecondary)
           Button(
             onClick = {
               copyGatewayDiagnosticsReport(
@@ -317,7 +320,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           ) {
             Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Copy Report for Claw", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+            Text(stringResource(R.string.openclaw_copy_report), style = mobileCallout.copy(fontWeight = FontWeight.Bold))
           }
         }
       }
@@ -336,12 +339,12 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
         horizontalArrangement = Arrangement.SpaceBetween,
       ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-          Text("Advanced controls", style = mobileHeadline, color = mobileText)
-          Text("Setup code, endpoint, TLS, token, password, onboarding.", style = mobileCaption1, color = mobileTextSecondary)
+          Text(stringResource(R.string.openclaw_advanced_controls), style = mobileHeadline, color = mobileText)
+          Text(stringResource(R.string.openclaw_advanced_controls_subtitle), style = mobileCaption1, color = mobileTextSecondary)
         }
         Icon(
           imageVector = if (advancedOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-          contentDescription = if (advancedOpen) "Collapse advanced controls" else "Expand advanced controls",
+          contentDescription = if (advancedOpen) stringResource(R.string.openclaw_collapse_advanced_controls) else stringResource(R.string.openclaw_expand_advanced_controls),
           tint = mobileTextSecondary,
         )
       }
@@ -358,33 +361,33 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
           verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-          Text("Connection method", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+          Text(stringResource(R.string.openclaw_connection_method), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MethodChip(
-              label = "Setup Code",
+              label = stringResource(R.string.openclaw_setup_code),
               active = inputMode == ConnectInputMode.SetupCode,
               onClick = { inputMode = ConnectInputMode.SetupCode },
             )
             MethodChip(
-              label = "Manual",
+              label = stringResource(R.string.openclaw_manual),
               active = inputMode == ConnectInputMode.Manual,
               onClick = { inputMode = ConnectInputMode.Manual },
             )
           }
 
-          Text("Run these on the gateway host:", style = mobileCallout, color = mobileTextSecondary)
+          Text(stringResource(R.string.openclaw_run_on_gateway_host), style = mobileCallout, color = mobileTextSecondary)
           CommandBlock("openclaw qr --setup-code-only")
           CommandBlock("openclaw qr --json")
 
           if (inputMode == ConnectInputMode.SetupCode) {
-            Text("Setup Code", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Text(stringResource(R.string.openclaw_setup_code), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             OutlinedTextField(
               value = setupCode,
               onValueChange = {
                 setupCode = it
                 validationText = null
               },
-              placeholder = { Text("Paste setup code", style = mobileBody, color = mobileTextTertiary) },
+              placeholder = { Text(stringResource(R.string.openclaw_paste_setup_code), style = mobileBody, color = mobileTextTertiary) },
               modifier = Modifier.fillMaxWidth(),
               minLines = 3,
               maxLines = 5,
@@ -399,7 +402,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
               QuickFillChip(
-                label = "Android Emulator",
+                label = stringResource(R.string.openclaw_android_emulator),
                 onClick = {
                   manualHostInput = "10.0.2.2"
                   manualPortInput = "18789"
@@ -408,7 +411,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
                 },
               )
               QuickFillChip(
-                label = "Localhost",
+                label = stringResource(R.string.openclaw_localhost),
                 onClick = {
                   manualHostInput = "127.0.0.1"
                   manualPortInput = "18789"
@@ -418,7 +421,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
               )
             }
 
-            Text("Host", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Text(stringResource(R.string.common_host), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             OutlinedTextField(
               value = manualHostInput,
               onValueChange = {
@@ -434,7 +437,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
               colors = outlinedColors(),
             )
 
-            Text("Port", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Text(stringResource(R.string.common_port), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             OutlinedTextField(
               value = manualPortInput,
               onValueChange = {
@@ -456,8 +459,8 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
               horizontalArrangement = Arrangement.SpaceBetween,
             ) {
               Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Use TLS", style = mobileHeadline, color = mobileText)
-                Text("Switch to secure websocket (`wss`).", style = mobileCallout, color = mobileTextSecondary)
+                Text(stringResource(R.string.openclaw_use_tls), style = mobileHeadline, color = mobileText)
+                Text(stringResource(R.string.openclaw_use_tls_subtitle), style = mobileCallout, color = mobileTextSecondary)
               }
               Switch(
                 checked = manualTlsInput,
@@ -475,7 +478,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
               )
             }
 
-            Text("Token (optional)", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Text(stringResource(R.string.openclaw_token_optional), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             OutlinedTextField(
               value = gatewayToken,
               onValueChange = { viewModel.setGatewayToken(it) },
@@ -488,7 +491,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
               colors = outlinedColors(),
             )
 
-            Text("Password (optional)", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Text(stringResource(R.string.openclaw_password_optional), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
             OutlinedTextField(
               value = passwordInput,
               onValueChange = { passwordInput = it },
@@ -509,7 +512,7 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           HorizontalDivider(color = mobileBorder)
 
           TextButton(onClick = { viewModel.setOnboardingCompleted(false) }) {
-            Text("Run onboarding again", style = mobileCallout.copy(fontWeight = FontWeight.SemiBold), color = mobileAccent)
+            Text(stringResource(R.string.openclaw_run_onboarding_again), style = mobileCallout.copy(fontWeight = FontWeight.SemiBold), color = mobileAccent)
           }
         }
       }
@@ -580,7 +583,7 @@ private fun CommandBlock(command: String) {
 private fun EndpointPreview(endpoint: String) {
   Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     HorizontalDivider(color = mobileBorder)
-    Text("Resolved endpoint", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+    Text(stringResource(R.string.openclaw_resolved_endpoint), style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
     Text(endpoint, style = mobileCallout.copy(fontFamily = FontFamily.Monospace), color = mobileText)
     HorizontalDivider(color = mobileBorder)
   }

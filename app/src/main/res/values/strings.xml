@@ -1,3 +1,361 @@
 <resources>
     <string name="app_name">ClawBerry</string>
+    <string name="tab_openclaw">OpenClaw</string>
+    <string name="tab_zeroclaw">ZeroClaw</string>
+    <string name="tab_picoclaw">PicoClaw</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="settings_clawboard_title">CLAWBOARD</string>
+    <string name="settings_clawboard_ip">IP Address</string>
+    <string name="settings_clawboard_port">Port</string>
+    <string name="settings_clawboard_open">Open</string>
+    <string name="settings_clawboard_scan_qr">Scan QR</string>
+    <string name="settings_network_discovery_title">NETWORK DISCOVERY</string>
+    <string name="settings_device_title">DEVICE</string>
+    <string name="settings_name_label">Name</string>
+    <string name="settings_media_title">MEDIA</string>
+    <string name="settings_notifications_title">NOTIFICATIONS</string>
+    <string name="settings_data_access_title">DATA ACCESS</string>
+    <string name="settings_location_title">LOCATION</string>
+    <string name="settings_preferences_title">PREFERENCES</string>
+
+    <string name="settings_language_title">LANGUAGE</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_english_subtitle">Use English UI text.</string>
+    <string name="settings_language_chinese">中文（简体）</string>
+    <string name="settings_language_chinese_subtitle">使用简体中文界面。</string>
+
+    <!-- Common -->
+    <string name="common_connect">Connect</string>
+    <string name="common_chat">Chat</string>
+    <string name="common_voice">Voice</string>
+    <string name="common_screen">Screen</string>
+    <string name="common_offline">Offline</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_endpoint">Endpoint</string>
+    <string name="common_status">Status</string>
+    <string name="common_disconnect_action">Disconnect</string>
+    <string name="common_host">Host</string>
+    <string name="common_port">Port</string>
+    <string name="common_attach">Attach</string>
+    <string name="common_send">Send</string>
+    <string name="common_open_settings">Open Settings</string>
+
+    <!-- OpenClaw Connect tab -->
+    <string name="openclaw_not_set">Not set</string>
+    <string name="openclaw_gateway_trust_title">Trust Gateway?</string>
+    <string name="openclaw_gateway_trust_message">Trust this gateway?\n\nSHA-256: %1$s</string>
+    <string name="openclaw_trust_continue">Trust &amp; Continue</string>
+    <string name="openclaw_gateway_connection">Gateway Connection</string>
+    <string name="openclaw_gateway_active_ready">Gateway is active and ready.</string>
+    <string name="openclaw_connect_to_gateway">Connect to a gateway to get started.</string>
+    <string name="openclaw_invalid_setup_code">Invalid setup code. Please check and try again.</string>
+    <string name="openclaw_invalid_manual_host_port">Invalid host or port. Please check and try again.</string>
+    <string name="openclaw_connect_gateway">Connect to Gateway</string>
+    <string name="openclaw_last_gateway_error">Last Gateway Error</string>
+    <string name="openclaw_android_version">Android version: %1$s</string>
+    <string name="openclaw_copy_report">Copy Report</string>
+    <string name="openclaw_advanced_controls">Advanced Controls</string>
+    <string name="openclaw_advanced_controls_subtitle">Setup code, manual host, TLS</string>
+    <string name="openclaw_collapse_advanced_controls">Collapse advanced controls</string>
+    <string name="openclaw_expand_advanced_controls">Expand advanced controls</string>
+    <string name="openclaw_connection_method">CONNECTION METHOD</string>
+    <string name="openclaw_setup_code">Setup Code</string>
+    <string name="openclaw_manual">Manual</string>
+    <string name="openclaw_run_on_gateway_host">Run on your gateway host:</string>
+    <string name="openclaw_paste_setup_code">Paste setup code here…</string>
+    <string name="openclaw_android_emulator">Android Emulator</string>
+    <string name="openclaw_localhost">Localhost</string>
+    <string name="openclaw_use_tls">Use TLS</string>
+    <string name="openclaw_use_tls_subtitle">Enable encrypted connection</string>
+    <string name="openclaw_token_optional">Token (optional)</string>
+    <string name="openclaw_password_optional">Password (optional)</string>
+    <string name="openclaw_run_onboarding_again">Run setup wizard again</string>
+    <string name="openclaw_resolved_endpoint">RESOLVED ENDPOINT</string>
+
+    <!-- OpenClaw Voice tab -->
+    <string name="openclaw_voice_state_queued">%1$d queued</string>
+    <string name="openclaw_voice_state_sending">Sending…</string>
+    <string name="openclaw_voice_state_cooldown">Cooldown…</string>
+    <string name="openclaw_voice_state_listening">Listening</string>
+    <string name="openclaw_voice_state_mic_off">Mic off</string>
+    <string name="openclaw_voice_permission_required">Microphone permission is required for voice. Tap \"Open Settings\" to enable it.</string>
+    <string name="openclaw_voice_permission_blocked">Microphone permission was denied. Tap \"Open Settings\" to enable it.</string>
+    <string name="openclaw_you">You</string>
+    <string name="openclaw_listening_response">Listening for response…</string>
+    <string name="openclaw_thinking">Thinking…</string>
+
+    <!-- OpenClaw Chat -->
+    <string name="openclaw_chat_placeholder">Message OpenClaw…</string>
+    <string name="openclaw_gateway_offline_connect_first">Gateway is offline. Connect first.</string>
+    <string name="openclaw_select_thinking_level">Select thinking level</string>
+    <string name="openclaw_refresh">Refresh</string>
+    <string name="openclaw_abort">Abort</string>
+    <string name="openclaw_thinking_low">Low</string>
+    <string name="openclaw_thinking_medium">Medium</string>
+    <string name="openclaw_thinking_high">High</string>
+    <string name="openclaw_thinking_off">Off</string>
+    <string name="openclaw_no_messages_yet">No messages yet</string>
+    <string name="openclaw_send_first_prompt">Send your first message to get started.</string>
+    <string name="openclaw_connect_gateway_first">Connect to a gateway first.</string>
+    <string name="openclaw_thinking_indicator">Thinking…</string>
+    <string name="openclaw_tools">Tools</string>
+    <string name="openclaw_running_tools">Running tools…</string>
+    <string name="openclaw_more_count">+%1$d more</string>
+    <string name="openclaw_live">Live</string>
+    <string name="openclaw_system">System</string>
+    <string name="openclaw_unsupported_attachment">Unsupported attachment</string>
+
+    <!-- Common extra -->
+    <string name="common_error">Error</string>
+    <string name="common_tap_to_close">Tap to close</string>
+
+    <!-- ZeroClaw status bar -->
+    <string name="zc_status_connected">Connected · %1$s:%2$d</string>
+    <string name="zc_status_connecting">Connecting…</string>
+    <string name="zc_status_pairing_required">Pairing required</string>
+    <string name="zc_status_reconnecting">Reconnecting…</string>
+    <string name="zc_reconnecting_attempt">Reconnecting… (attempt %1$d)</string>
+
+    <!-- ZeroClaw Connect tab -->
+    <string name="zc_gateway_connection">Gateway Connection</string>
+    <string name="zc_gateway_active_ready">Your ZeroClaw gateway is active and ready.</string>
+    <string name="zc_connect_directly">Connect directly to a ZeroClaw gateway.</string>
+    <string name="zc_connection_error">Connection error</string>
+    <string name="zc_checking_gateway">Checking gateway…</string>
+    <string name="zc_pairing">Pairing…</string>
+    <string name="zc_pairing_required">Pairing required</string>
+    <string name="zc_get_paircode_hint">Get your code:  zeroclaw gateway get-paircode</string>
+    <string name="zc_pair_code">Pair code</string>
+    <string name="zc_pair_and_connect">Pair &amp; Connect</string>
+    <string name="zc_connect_gateway">Connect Gateway</string>
+    <string name="zc_gateway">Gateway</string>
+    <string name="zc_bearer_token_optional">Bearer token (optional – skips pairing)</string>
+
+    <!-- ZeroClaw Info card -->
+    <string name="zc_state_connected">Connected</string>
+    <string name="zc_token">Token</string>
+    <string name="zc_clear">Clear</string>
+
+    <!-- ZeroClaw Chat tab -->
+    <string name="zc_not_connected">Not connected</string>
+    <string name="zc_setup_gateway_first">Set up your gateway on the Connect tab first.</string>
+    <string name="zc_go_to_connect">Go to Connect</string>
+    <string name="zc_message_placeholder">Message…</string>
+    <string name="zc_regenerate">Regenerate</string>
+    <string name="zc_stop">Stop</string>
+    <string name="zc_clear_chat">Clear chat</string>
+
+    <!-- ZeroClaw Settings tab -->
+    <string name="zc_gateway_address">Gateway address</string>
+    <string name="zc_saved_token">Saved token</string>
+    <string name="zc_clear_and_reset">Clear &amp; Reset</string>
+    <string name="zc_no_token_saved">No token saved</string>
+
+    <!-- ZeroClaw session picker -->
+    <string name="zc_resume_session">Resume a session?</string>
+    <string name="zc_resume_session_subtitle">Restore a previous conversation, or start fresh.</string>
+    <string name="zc_session_message_count">%1$d messages</string>
+    <string name="zc_session_id_prefix">ID: %1$s…</string>
+    <string name="zc_start_new_session">Start New Session</string>
+    <string name="zc_restoring_session">Restoring session history…</string>
+
+    <!-- PicoClaw status bar -->
+    <string name="pc_mode_web">web</string>
+    <string name="pc_mode_direct">direct</string>
+    <string name="pc_status_idle">Idle · %1$s</string>
+    <string name="pc_status_fetching_token">Fetching token…</string>
+    <string name="pc_status_connecting">Connecting…</string>
+    <string name="pc_status_reconnecting">Reconnecting…</string>
+    <string name="pc_status_connected">Connected · %1$s:%2$d</string>
+    <string name="pc_state_connected">Connected</string>
+
+    <!-- PicoClaw Connect tab -->
+    <string name="pc_gateway_title">PicoClaw Gateway</string>
+    <string name="pc_scan_qr_camera">Scan QR with Camera</string>
+    <string name="pc_pick_qr_gallery">Pick QR from Gallery</string>
+    <string name="pc_or_fill_manually">or fill manually</string>
+    <string name="pc_fetching_token">Fetching token from gateway...</string>
+    <string name="pc_waiting_reconnect">Waiting to reconnect...</string>
+    <string name="pc_opening_websocket">Opening WebSocket...</string>
+    <string name="pc_cancel_reconnect">Cancel Reconnect</string>
+    <string name="pc_go_to_chat">Go to Chat</string>
+    <string name="pc_info_not_connected">Not connected</string>
+
+    <!-- PicoClaw Info card -->
+    <string name="pc_mode_label">Mode</string>
+    <string name="pc_mode_web_backend">Web Backend</string>
+    <string name="pc_mode_direct_label">Direct</string>
+    <string name="pc_mode_web_port">Port 18800</string>
+    <string name="pc_mode_direct_port">Port 18790</string>
+    <string name="pc_connection_mode">Connection Mode</string>
+
+    <!-- PicoClaw Setup form -->
+    <string name="pc_gateway_host">Gateway Host</string>
+    <string name="pc_web_port">Web Port</string>
+    <string name="pc_gateway_port">Gateway Port</string>
+    <string name="pc_token_auto_fetch">Token will be fetched automatically from the gateway.</string>
+    <string name="pc_bearer_token">Bearer Token</string>
+    <string name="pc_paste_token">Paste your token here</string>
+
+    <!-- PicoClaw Chat tab -->
+    <string name="pc_not_connected">Not connected</string>
+    <string name="pc_go_to_connect">Go to Connect</string>
+    <string name="pc_message_placeholder">Message PicoClaw...</string>
+
+    <!-- PicoClaw Settings tab -->
+    <string name="pc_settings_title">PicoClaw Settings</string>
+    <string name="pc_settings_gateway_address">Gateway Address</string>
+    <string name="pc_settings_web_backend_port">Web Backend Port</string>
+    <string name="pc_settings_direct_gateway_port">Direct Gateway Port</string>
+    <string name="pc_settings_auth_token">Authentication Token</string>
+    <string name="pc_settings_token_direct">Token (Direct Mode)</string>
+    <string name="pc_settings_token_placeholder">Paste bearer token for direct mode</string>
+    <string name="pc_settings_reset">Reset</string>
+    <string name="pc_settings_clear_token">Clear Token &amp; Disconnect</string>
+
+    <!-- PicoClaw photo permission -->
+    <string name="pc_photo_permission_title">Photo Permission Required</string>
+    <string name="pc_photo_permission_message">To scan a QR code from your gallery, ClawBerry needs access to your photos.\n\nPlease grant the permission in Settings → Apps → ClawBerry → Permissions.</string>
+
+    <!-- Find Claw Gateway card -->
+    <string name="find_claw_title">Find Claw Gateway</string>
+    <string name="find_claw_description">Scan your local network for gateways broadcasting via mDNS (avahi / Bonjour).</string>
+    <string name="find_claw_scanning">Scanning…</string>
+    <string name="find_claw_stop_scan">Stop scan</string>
+    <string name="find_claw_scan_again">Scan Again</string>
+    <string name="find_claw_start_scan">Start Scan</string>
+    <string name="find_claw_gateways_found">%1$d gateway(s) found</string>
+    <string name="find_claw_no_gateways">No gateways found. Make sure your gateway device is on the same network.</string>
+    <string name="find_claw_open_in_browser">Open in browser</string>
+    <string name="find_claw_open">Open</string>
+    <string name="find_claw_use">Use</string>
+
+    <!-- OpenClaw Voice tab – additional -->
+    <string name="openclaw_tap_mic_hint">Tap the mic to start</string>
+    <string name="openclaw_pause_sends_turn">Each pause sends a turn automatically.</string>
+    <string name="openclaw_mute_speaker">Mute speaker</string>
+    <string name="openclaw_unmute_speaker">Unmute speaker</string>
+    <string name="openclaw_speaker_label">Speaker</string>
+    <string name="openclaw_speaker_muted">Muted</string>
+    <string name="openclaw_mic_turn_off">Turn microphone off</string>
+    <string name="openclaw_mic_turn_on">Turn microphone on</string>
+
+    <!-- Settings – shared actions -->
+    <string name="settings_action_grant">Grant</string>
+    <string name="settings_action_manage">Manage</string>
+    <string name="settings_action_enable">Enable</string>
+
+    <!-- Settings – Media -->
+    <string name="settings_media_mic_title">Microphone</string>
+    <string name="settings_media_mic_granted">Granted</string>
+    <string name="settings_media_mic_subtitle">Required for voice transcription.</string>
+    <string name="settings_media_camera_title">Camera</string>
+    <string name="settings_media_camera_subtitle">Photos and video clips (foreground only).</string>
+
+    <!-- Settings – Notifications -->
+    <string name="settings_notif_system_title">System Notifications</string>
+    <string name="settings_notif_system_subtitle">Alerts and foreground service.</string>
+    <string name="settings_notif_listener_title">Notification Listener</string>
+    <string name="settings_notif_listener_subtitle">Read and interact with notifications.</string>
+    <string name="settings_notif_sms_title">SMS</string>
+    <string name="settings_notif_sms_subtitle">Send and search SMS from this device.</string>
+
+    <!-- Settings – Data Access -->
+    <string name="settings_data_photos_title">Photos</string>
+    <string name="settings_data_photos_subtitle">Access recent photos.</string>
+    <string name="settings_data_contacts_title">Contacts</string>
+    <string name="settings_data_contacts_subtitle">Search and add contacts.</string>
+    <string name="settings_data_calendar_title">Calendar</string>
+    <string name="settings_data_calendar_subtitle">Read and create events.</string>
+    <string name="settings_data_calllog_title">Call Log</string>
+    <string name="settings_data_calllog_subtitle">Search recent call history.</string>
+    <string name="settings_data_motion_title">Motion</string>
+    <string name="settings_data_motion_subtitle">Track steps and activity.</string>
+
+    <!-- Settings – Location -->
+    <string name="settings_location_off">Off</string>
+    <string name="settings_location_off_subtitle">Disable location sharing.</string>
+    <string name="settings_location_while_using">While Using</string>
+    <string name="settings_location_while_using_subtitle">Only while OpenClaw is open.</string>
+    <string name="settings_location_precise">Precise Location</string>
+    <string name="settings_location_precise_subtitle">Use precise GPS when available.</string>
+
+    <!-- Settings – Preferences -->
+    <string name="settings_pref_prevent_sleep">Prevent Sleep</string>
+    <string name="settings_pref_prevent_sleep_subtitle">Keep screen awake while open.</string>
+    <string name="settings_pref_debug_canvas">Debug Canvas</string>
+    <string name="settings_pref_debug_canvas_subtitle">Show status overlay on canvas.</string>
+
+    <!-- Onboarding Flow -->
+    <string name="onboarding_mobile_setup">Mobile Setup</string>
+    <string name="onboarding_step_welcome">Welcome</string>
+    <string name="onboarding_step_gateway">Gateway</string>
+    <string name="onboarding_step_permissions">Permissions</string>
+    <string name="onboarding_back">Back</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_finish">Finish</string>
+    <string name="onboarding_trust_message">First-time TLS connection.\n\nVerify this SHA-256 fingerprint before trusting:\n%1$s</string>
+    <!-- Onboarding Welcome step -->
+    <string name="onboarding_welcome_f1_title">Connect to your gateway</string>
+    <string name="onboarding_welcome_f1_sub">Scan a QR code or enter your host manually</string>
+    <string name="onboarding_welcome_f2_title">Choose your permissions</string>
+    <string name="onboarding_welcome_f2_sub">Enable only what you need, change anytime</string>
+    <string name="onboarding_welcome_f3_title">Chat, voice, and screen</string>
+    <string name="onboarding_welcome_f3_sub">Full operator control from your phone</string>
+    <string name="onboarding_welcome_f4_title">Verify your connection</string>
+    <string name="onboarding_welcome_f4_sub">Live check before you enter the app</string>
+    <!-- Onboarding Gateway step -->
+    <string name="onboarding_gateway_hint">Run `openclaw qr` on your gateway host, then scan the code with this device.</string>
+    <string name="onboarding_gateway_scan_qr">Scan QR code</string>
+    <string name="onboarding_gateway_qr_captured">QR captured. Review endpoint below.</string>
+    <string name="onboarding_gateway_advanced_title">Advanced setup</string>
+    <string name="onboarding_gateway_advanced_sub">Paste setup code or enter host/port manually.</string>
+    <string name="onboarding_gateway_collapse">Collapse advanced setup</string>
+    <string name="onboarding_gateway_expand">Expand advanced setup</string>
+    <string name="onboarding_gateway_placeholder_setup_code">Paste code from `openclaw qr --setup-code-only`</string>
+    <string name="onboarding_gateway_tls_sub">Switch to secure websocket (`wss`).</string>
+    <string name="onboarding_gateway_method_qr">QR / Setup Code</string>
+    <string name="onboarding_error_invalid_qr">QR code did not contain a valid setup code.</string>
+    <string name="onboarding_error_scan_first">Scan QR code first, or use Advanced setup.</string>
+    <string name="onboarding_error_setup_code_url">Setup code has invalid gateway URL.</string>
+    <string name="onboarding_error_manual_invalid">Manual endpoint is invalid.</string>
+    <string name="onboarding_error_gateway_url">Invalid gateway URL.</string>
+    <!-- Onboarding Permissions step -->
+    <string name="onboarding_perm_intro">Enable only what you need. You can change these anytime in Settings.</string>
+    <string name="onboarding_perm_section_system">System</string>
+    <string name="onboarding_perm_section_media">Media</string>
+    <string name="onboarding_perm_section_personal">Personal Data</string>
+    <string name="onboarding_perm_discovery_title">Gateway discovery</string>
+    <string name="onboarding_perm_discovery_sub">Find gateways on your local network</string>
+    <string name="onboarding_perm_location_title">Location</string>
+    <string name="onboarding_perm_location_sub">Share device location while app is open</string>
+    <string name="onboarding_perm_notifications_title">Notifications</string>
+    <string name="onboarding_perm_notifications_sub">Alerts and foreground service notices</string>
+    <string name="onboarding_perm_notif_listener_sub">Read and act on your notifications</string>
+    <string name="onboarding_perm_mic_sub">Voice transcription in the Voice tab</string>
+    <string name="onboarding_perm_camera_sub">Take photos and short video clips</string>
+    <string name="onboarding_perm_photos_sub">Access your recent photos</string>
+    <string name="onboarding_perm_contacts_sub">Search and add contacts</string>
+    <string name="onboarding_perm_calendar_sub">Read and create calendar events</string>
+    <string name="onboarding_perm_motion_sub">Activity and step tracking</string>
+    <string name="onboarding_perm_motion_unavailable">Unavailable on this device</string>
+    <string name="onboarding_perm_sms_sub">Send and search text messages via the gateway</string>
+    <string name="onboarding_perm_status_granted">Granted</string>
+    <string name="onboarding_perm_status_not_granted">Not granted</string>
+    <string name="onboarding_perm_footer">All settings can be changed later in Settings.</string>
+    <string name="onboarding_perm_none_selected">None selected</string>
+    <!-- Onboarding Review step -->
+    <string name="onboarding_review_title">Review</string>
+    <string name="onboarding_review_method">Method</string>
+    <string name="onboarding_review_connect_hint">Tap Connect to verify your gateway is reachable.</string>
+    <string name="onboarding_review_connected">Connected</string>
+    <string name="onboarding_review_pairing_required">Pairing Required</string>
+    <string name="onboarding_review_failed">Connection Failed</string>
+    <string name="onboarding_review_pairing_msg">Approve this phone on the gateway host, or copy the report below.</string>
+    <string name="onboarding_review_failed_msg">Copy this report and give it to your Claw.</string>
+    <string name="onboarding_review_error_label">Error</string>
+    <string name="onboarding_review_copy_report">Copy Report for Claw</string>
+    <string name="onboarding_review_tap_connect_again">Then tap Connect again.</string>
+    <string name="onboarding_review_android_version">OpenClaw Android %1$s</string>
 </resources>

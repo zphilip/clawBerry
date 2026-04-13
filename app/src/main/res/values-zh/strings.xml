@@ -1,0 +1,360 @@
+<resources>
+    <string name="app_name">ClawBerry</string>
+    <string name="tab_openclaw">OpenClaw</string>
+    <string name="tab_zeroclaw">ZeroClaw</string>
+    <string name="tab_picoclaw">PicoClaw</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="settings_clawboard_title">ClawBoard</string>
+    <string name="settings_clawboard_ip">IP 地址</string>
+    <string name="settings_clawboard_port">端口</string>
+    <string name="settings_clawboard_open">打开</string>
+    <string name="settings_clawboard_scan_qr">扫描二维码</string>
+    <string name="settings_network_discovery_title">网络发现</string>
+    <string name="settings_device_title">设备</string>
+    <string name="settings_name_label">名称</string>
+    <string name="settings_media_title">媒体</string>
+    <string name="settings_notifications_title">通知</string>
+    <string name="settings_data_access_title">数据访问</string>
+    <string name="settings_location_title">定位</string>
+    <string name="settings_preferences_title">偏好设置</string>
+
+    <string name="settings_language_title">语言</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_english_subtitle">使用英文界面。</string>
+    <string name="settings_language_chinese">中文（简体）</string>
+    <string name="settings_language_chinese_subtitle">使用简体中文界面。</string>
+
+    <!-- Common -->
+    <string name="common_connect">连接</string>
+    <string name="common_chat">聊天</string>
+    <string name="common_voice">语音</string>
+    <string name="common_screen">屏幕</string>
+    <string name="common_offline">离线</string>
+    <string name="common_cancel">取消</string>
+    <string name="common_endpoint">端点</string>
+    <string name="common_status">状态</string>
+    <string name="common_disconnect_action">断开连接</string>
+    <string name="common_host">主机</string>
+    <string name="common_port">端口</string>
+    <string name="common_attach">附件</string>
+    <string name="common_send">发送</string>
+    <string name="common_open_settings">打开设置</string>
+
+    <!-- OpenClaw Connect tab -->
+    <string name="openclaw_not_set">未设置</string>
+    <string name="openclaw_gateway_trust_title">信任网关？</string>
+    <string name="openclaw_gateway_trust_message">是否信任此网关？\n\nSHA-256: %1$s</string>
+    <string name="openclaw_trust_continue">信任并继续</string>
+    <string name="openclaw_gateway_connection">网关连接</string>
+    <string name="openclaw_gateway_active_ready">网关已激活并准备就绪。</string>
+    <string name="openclaw_connect_to_gateway">连接到网关以开始使用。</string>
+    <string name="openclaw_invalid_setup_code">无效的设置码，请检查后重试。</string>
+    <string name="openclaw_invalid_manual_host_port">无效的主机或端口，请检查后重试。</string>
+    <string name="openclaw_connect_gateway">连接到网关</string>
+    <string name="openclaw_last_gateway_error">最后一次网关错误</string>
+    <string name="openclaw_android_version">Android 版本：%1$s</string>
+    <string name="openclaw_copy_report">复制报告</string>
+    <string name="openclaw_advanced_controls">高级控制</string>
+    <string name="openclaw_advanced_controls_subtitle">设置码、手动主机、TLS</string>
+    <string name="openclaw_collapse_advanced_controls">收起高级控制</string>
+    <string name="openclaw_expand_advanced_controls">展开高级控制</string>
+    <string name="openclaw_connection_method">连接方式</string>
+    <string name="openclaw_setup_code">设置码</string>
+    <string name="openclaw_manual">手动</string>
+    <string name="openclaw_run_on_gateway_host">在您的网关主机上运行：</string>
+    <string name="openclaw_paste_setup_code">在此粘贴设置码…</string>
+    <string name="openclaw_android_emulator">Android 模拟器</string>
+    <string name="openclaw_localhost">本地主机</string>
+    <string name="openclaw_use_tls">使用 TLS</string>
+    <string name="openclaw_use_tls_subtitle">启用加密连接</string>
+    <string name="openclaw_token_optional">令牌（可选）</string>
+    <string name="openclaw_password_optional">密码（可选）</string>
+    <string name="openclaw_run_onboarding_again">重新运行设置向导</string>
+    <string name="openclaw_resolved_endpoint">已解析端点</string>
+
+    <!-- OpenClaw Voice tab -->
+    <string name="openclaw_voice_state_queued">已排队 %1$d 条</string>
+    <string name="openclaw_voice_state_sending">发送中…</string>
+    <string name="openclaw_voice_state_cooldown">冷却中…</string>
+    <string name="openclaw_voice_state_listening">监听中</string>
+    <string name="openclaw_voice_state_mic_off">麦克风已关闭</string>
+    <string name="openclaw_voice_permission_required">语音功能需要麦克风权限。请点击\"打开设置\"以启用。</string>
+    <string name="openclaw_voice_permission_blocked">麦克风权限被拒绝。请点击\"打开设置\"以启用。</string>
+    <string name="openclaw_you">您</string>
+    <string name="openclaw_listening_response">等待回应…</string>
+    <string name="openclaw_thinking">思考中…</string>
+
+    <!-- OpenClaw Chat -->
+    <string name="openclaw_chat_placeholder">发送消息给 OpenClaw…</string>
+    <string name="openclaw_gateway_offline_connect_first">网关离线，请先连接。</string>
+    <string name="openclaw_select_thinking_level">选择思考级别</string>
+    <string name="openclaw_refresh">刷新</string>
+    <string name="openclaw_abort">中止</string>
+    <string name="openclaw_thinking_low">低</string>
+    <string name="openclaw_thinking_medium">中</string>
+    <string name="openclaw_thinking_high">高</string>
+    <string name="openclaw_thinking_off">关</string>
+    <string name="openclaw_no_messages_yet">暂无消息</string>
+    <string name="openclaw_send_first_prompt">发送您的第一条消息以开始对话。</string>
+    <string name="openclaw_connect_gateway_first">请先连接到网关。</string>
+    <string name="openclaw_thinking_indicator">思考中…</string>
+    <string name="openclaw_tools">工具</string>
+    <string name="openclaw_running_tools">运行中的工具…</string>
+    <string name="openclaw_more_count">还有 %1$d 项</string>
+    <string name="openclaw_live">实时</string>
+    <string name="openclaw_system">系统</string>
+    <string name="openclaw_unsupported_attachment">不支持的附件</string>
+
+    <!-- Common extra -->
+    <string name="common_error">错误</string>
+    <string name="common_tap_to_close">点击关闭</string>
+
+    <!-- ZeroClaw status bar -->
+    <string name="zc_status_connected">已连接 · %1$s:%2$d</string>
+    <string name="zc_status_connecting">连接中…</string>
+    <string name="zc_status_pairing_required">需要配对</string>
+    <string name="zc_status_reconnecting">重新连接中…</string>
+    <string name="zc_reconnecting_attempt">重新连接中…（第 %1$d 次尝试）</string>
+
+    <!-- ZeroClaw Connect tab -->
+    <string name="zc_gateway_connection">网关连接</string>
+    <string name="zc_gateway_active_ready">ZeroClaw 网关已激活并准备就绪。</string>
+    <string name="zc_connect_directly">直接连接到 ZeroClaw 网关。</string>
+    <string name="zc_connection_error">连接错误</string>
+    <string name="zc_checking_gateway">正在检查网关…</string>
+    <string name="zc_pairing">配对中…</string>
+    <string name="zc_pairing_required">需要配对</string>
+    <string name="zc_get_paircode_hint">获取配对码：zeroclaw gateway get-paircode</string>
+    <string name="zc_pair_code">配对码</string>
+    <string name="zc_pair_and_connect">配对并连接</string>
+    <string name="zc_connect_gateway">连接网关</string>
+    <string name="zc_gateway">网关</string>
+    <string name="zc_bearer_token_optional">Bearer 令牌（可选 – 跳过配对）</string>
+
+    <!-- ZeroClaw Info card -->
+    <string name="zc_state_connected">已连接</string>
+    <string name="zc_token">令牌</string>
+    <string name="zc_clear">清除</string>
+
+    <!-- ZeroClaw Chat tab -->
+    <string name="zc_not_connected">未连接</string>
+    <string name="zc_setup_gateway_first">请先在"连接"标签页设置网关。</string>
+    <string name="zc_go_to_connect">前往连接</string>
+    <string name="zc_message_placeholder">发送消息…</string>
+    <string name="zc_regenerate">重新生成</string>
+    <string name="zc_stop">停止</string>
+    <string name="zc_clear_chat">清空聊天</string>
+
+    <!-- ZeroClaw Settings tab -->
+    <string name="zc_gateway_address">网关地址</string>
+    <string name="zc_saved_token">已保存令牌</string>
+    <string name="zc_clear_and_reset">清除并重置</string>
+    <string name="zc_no_token_saved">未保存令牌</string>
+
+    <!-- ZeroClaw session picker -->
+    <string name="zc_resume_session">恢复会话？</string>
+    <string name="zc_resume_session_subtitle">恢复之前的对话，或开始新对话。</string>
+    <string name="zc_session_message_count">%1$d 条消息</string>
+    <string name="zc_session_id_prefix">ID: %1$s…</string>
+    <string name="zc_start_new_session">开始新会话</string>
+    <string name="zc_restoring_session">正在恢复会话历史…</string>
+
+    <!-- PicoClaw status bar -->
+    <string name="pc_mode_web">网页</string>
+    <string name="pc_mode_direct">直连</string>
+    <string name="pc_status_idle">空闲 · %1$s</string>
+    <string name="pc_status_fetching_token">正在获取令牌…</string>
+    <string name="pc_status_connecting">连接中…</string>
+    <string name="pc_status_reconnecting">重新连接中…</string>
+    <string name="pc_status_connected">已连接 · %1$s:%2$d</string>
+    <string name="pc_state_connected">已连接</string>
+
+    <!-- PicoClaw Connect tab -->
+    <string name="pc_gateway_title">PicoClaw 网关</string>
+    <string name="pc_scan_qr_camera">用相机扫描二维码</string>
+    <string name="pc_pick_qr_gallery">从相册选取二维码</string>
+    <string name="pc_or_fill_manually">或手动填写</string>
+    <string name="pc_fetching_token">正在从网关获取令牌...</string>
+    <string name="pc_waiting_reconnect">等待重新连接...</string>
+    <string name="pc_opening_websocket">正在建立 WebSocket...</string>
+    <string name="pc_cancel_reconnect">取消重连</string>
+    <string name="pc_go_to_chat">前往聊天</string>
+    <string name="pc_info_not_connected">未连接</string>
+
+    <!-- PicoClaw Info card -->
+    <string name="pc_mode_label">模式</string>
+    <string name="pc_mode_web_backend">网页后端</string>
+    <string name="pc_mode_direct_label">直连</string>
+    <string name="pc_mode_web_port">端口 18800</string>
+    <string name="pc_mode_direct_port">端口 18790</string>
+    <string name="pc_connection_mode">连接模式</string>
+
+    <!-- PicoClaw Setup form -->
+    <string name="pc_gateway_host">网关主机</string>
+    <string name="pc_web_port">网页端口</string>
+    <string name="pc_gateway_port">网关端口</string>
+    <string name="pc_token_auto_fetch">令牌将自动从网关获取。</string>
+    <string name="pc_bearer_token">Bearer 令牌</string>
+    <string name="pc_paste_token">在此粘贴令牌</string>
+
+    <!-- PicoClaw Chat tab -->
+    <string name="pc_not_connected">未连接</string>
+    <string name="pc_go_to_connect">前往连接</string>
+    <string name="pc_message_placeholder">发送消息给 PicoClaw...</string>
+
+    <!-- PicoClaw Settings tab -->
+    <string name="pc_settings_title">PicoClaw 设置</string>
+    <string name="pc_settings_gateway_address">网关地址</string>
+    <string name="pc_settings_web_backend_port">网页后端端口</string>
+    <string name="pc_settings_direct_gateway_port">直连网关端口</string>
+    <string name="pc_settings_auth_token">认证令牌</string>
+    <string name="pc_settings_token_direct">令牌（直连模式）</string>
+    <string name="pc_settings_token_placeholder">粘贴直连模式的 Bearer 令牌</string>
+    <string name="pc_settings_reset">重置</string>
+    <string name="pc_settings_clear_token">清除令牌并断开连接</string>
+
+    <!-- PicoClaw photo permission -->
+    <string name="pc_photo_permission_title">需要相册权限</string>
+    <string name="pc_photo_permission_message">要从相册扫描二维码，ClawBerry 需要访问您的照片。\n\n请在"设置 → 应用 → ClawBerry → 权限"中授予权限。</string>
+    <!-- Find Claw Gateway card -->
+    <string name="find_claw_title">发现 Claw 网关</string>
+    <string name="find_claw_description">扫描本地网络，查找通过 mDNS（avahi / Bonjour）广播的网关。</string>
+    <string name="find_claw_scanning">扫描中…</string>
+    <string name="find_claw_stop_scan">停止扫描</string>
+    <string name="find_claw_scan_again">重新扫描</string>
+    <string name="find_claw_start_scan">开始扫描</string>
+    <string name="find_claw_gateways_found">发现 %1$d 个网关</string>
+    <string name="find_claw_no_gateways">未发现网关，请确认您的网关设备与手机在同一网络。</string>
+    <string name="find_claw_open_in_browser">在浏览器中打开</string>
+    <string name="find_claw_open">打开</string>
+    <string name="find_claw_use">使用</string>
+
+    <!-- OpenClaw Voice tab – additional -->
+    <string name="openclaw_tap_mic_hint">点击麦克风开始</string>
+    <string name="openclaw_pause_sends_turn">每次停顿会自动发送一轮对话。</string>
+    <string name="openclaw_mute_speaker">静音扬声器</string>
+    <string name="openclaw_unmute_speaker">取消静音</string>
+    <string name="openclaw_speaker_label">扬声器</string>
+    <string name="openclaw_speaker_muted">已静音</string>
+    <string name="openclaw_mic_turn_off">关闭麦克风</string>
+    <string name="openclaw_mic_turn_on">开启麦克风</string>
+
+    <!-- Settings – shared actions -->
+    <string name="settings_action_grant">授权</string>
+    <string name="settings_action_manage">管理</string>
+    <string name="settings_action_enable">启用</string>
+
+    <!-- Settings – Media -->
+    <string name="settings_media_mic_title">麦克风</string>
+    <string name="settings_media_mic_granted">已授权</string>
+    <string name="settings_media_mic_subtitle">语音转录需要此权限。</string>
+    <string name="settings_media_camera_title">摄像头</string>
+    <string name="settings_media_camera_subtitle">照片和视频片段（仅前台）。</string>
+
+    <!-- Settings – Notifications -->
+    <string name="settings_notif_system_title">系统通知</string>
+    <string name="settings_notif_system_subtitle">提醒和前台服务。</string>
+    <string name="settings_notif_listener_title">通知监听</string>
+    <string name="settings_notif_listener_subtitle">读取和操作通知。</string>
+    <string name="settings_notif_sms_title">短信</string>
+    <string name="settings_notif_sms_subtitle">从本设备发送和搜索短信。</string>
+
+    <!-- Settings – Data Access -->
+    <string name="settings_data_photos_title">照片</string>
+    <string name="settings_data_photos_subtitle">访问最近的照片。</string>
+    <string name="settings_data_contacts_title">通讯录</string>
+    <string name="settings_data_contacts_subtitle">搜索和添加联系人。</string>
+    <string name="settings_data_calendar_title">日历</string>
+    <string name="settings_data_calendar_subtitle">读取和创建日历事件。</string>
+    <string name="settings_data_calllog_title">通话记录</string>
+    <string name="settings_data_calllog_subtitle">搜索最近的通话记录。</string>
+    <string name="settings_data_motion_title">运动</string>
+    <string name="settings_data_motion_subtitle">追踪步数和活动。</string>
+
+    <!-- Settings – Location -->
+    <string name="settings_location_off">关闭</string>
+    <string name="settings_location_off_subtitle">停用位置共享。</string>
+    <string name="settings_location_while_using">使用时</string>
+    <string name="settings_location_while_using_subtitle">仅在 OpenClaw 开启时。</string>
+    <string name="settings_location_precise">精确位置</string>
+    <string name="settings_location_precise_subtitle">在可用时使用精确 GPS。</string>
+
+    <!-- Settings – Preferences -->
+    <string name="settings_pref_prevent_sleep">防止休眠</string>
+    <string name="settings_pref_prevent_sleep_subtitle">保持屏幕在开启时常亮。</string>
+    <string name="settings_pref_debug_canvas">调试画布</string>
+    <string name="settings_pref_debug_canvas_subtitle">在画布上显示状态叠加层。</string>
+
+    <!-- Onboarding Flow -->
+    <string name="onboarding_mobile_setup">移动端设置</string>
+    <string name="onboarding_step_welcome">欢迎</string>
+    <string name="onboarding_step_gateway">网关</string>
+    <string name="onboarding_step_permissions">权限</string>
+    <string name="onboarding_back">返回</string>
+    <string name="onboarding_next">下一步</string>
+    <string name="onboarding_finish">完成</string>
+    <string name="onboarding_trust_message">首次 TLS 连接。\n\n请在信任前验证此 SHA-256 指纹：\n%1$s</string>
+    <!-- Onboarding Welcome step -->
+    <string name="onboarding_welcome_f1_title">连接到网关</string>
+    <string name="onboarding_welcome_f1_sub">扫描二维码或手动输入主机地址</string>
+    <string name="onboarding_welcome_f2_title">选择您的权限</string>
+    <string name="onboarding_welcome_f2_sub">仅启用所需权限，随时可更改</string>
+    <string name="onboarding_welcome_f3_title">聊天、语音与屏幕</string>
+    <string name="onboarding_welcome_f3_sub">从手机完全控制您的设备</string>
+    <string name="onboarding_welcome_f4_title">验证连接</string>
+    <string name="onboarding_welcome_f4_sub">进入应用前进行实时检查</string>
+    <!-- Onboarding Gateway step -->
+    <string name="onboarding_gateway_hint">在网关主机上运行 `openclaw qr`，然后用本设备扫描二维码。</string>
+    <string name="onboarding_gateway_scan_qr">扫描二维码</string>
+    <string name="onboarding_gateway_qr_captured">已获取二维码，请查看下方端点信息。</string>
+    <string name="onboarding_gateway_advanced_title">高级设置</string>
+    <string name="onboarding_gateway_advanced_sub">粘贴设置码或手动输入主机/端口。</string>
+    <string name="onboarding_gateway_collapse">收起高级设置</string>
+    <string name="onboarding_gateway_expand">展开高级设置</string>
+    <string name="onboarding_gateway_placeholder_setup_code">从 `openclaw qr --setup-code-only` 粘贴码</string>
+    <string name="onboarding_gateway_tls_sub">切换为安全 WebSocket（`wss`）。</string>
+    <string name="onboarding_gateway_method_qr">二维码/设置码</string>
+    <string name="onboarding_error_invalid_qr">二维码未包含有效的设置码。</string>
+    <string name="onboarding_error_scan_first">请先扫描二维码，或使用高级设置。</string>
+    <string name="onboarding_error_setup_code_url">设置码中的网关 URL 无效。</string>
+    <string name="onboarding_error_manual_invalid">手动端点无效。</string>
+    <string name="onboarding_error_gateway_url">无效的网关 URL。</string>
+    <!-- Onboarding Permissions step -->
+    <string name="onboarding_perm_intro">仅启用所需权限，随时可在设置中更改。</string>
+    <string name="onboarding_perm_section_system">系统</string>
+    <string name="onboarding_perm_section_media">媒体</string>
+    <string name="onboarding_perm_section_personal">个人数据</string>
+    <string name="onboarding_perm_discovery_title">网关发现</string>
+    <string name="onboarding_perm_discovery_sub">在本地网络查找网关</string>
+    <string name="onboarding_perm_location_title">定位</string>
+    <string name="onboarding_perm_location_sub">应用运行期间共享设备位置</string>
+    <string name="onboarding_perm_notifications_title">通知</string>
+    <string name="onboarding_perm_notifications_sub">提醒和前台服务通知</string>
+    <string name="onboarding_perm_notif_listener_sub">读取并操作您的通知</string>
+    <string name="onboarding_perm_mic_sub">语音标签页中的语音转录</string>
+    <string name="onboarding_perm_camera_sub">拍摄照片和短视频</string>
+    <string name="onboarding_perm_photos_sub">访问您最近的照片</string>
+    <string name="onboarding_perm_contacts_sub">搜索和添加联系人</string>
+    <string name="onboarding_perm_calendar_sub">读取和创建日历事件</string>
+    <string name="onboarding_perm_motion_sub">活动与步数追踪</string>
+    <string name="onboarding_perm_motion_unavailable">此设备不支持</string>
+    <string name="onboarding_perm_sms_sub">通过网关发送和搜索短信</string>
+    <string name="onboarding_perm_status_granted">已授权</string>
+    <string name="onboarding_perm_status_not_granted">未授权</string>
+    <string name="onboarding_perm_footer">所有设置均可稍后在设置中更改。</string>
+    <string name="onboarding_perm_none_selected">未选择</string>
+    <!-- Onboarding Review step -->
+    <string name="onboarding_review_title">审核</string>
+    <string name="onboarding_review_method">方式</string>
+    <string name="onboarding_review_connect_hint">点击连接以验证网关是否可达。</string>
+    <string name="onboarding_review_connected">已连接</string>
+    <string name="onboarding_review_pairing_required">需要配对</string>
+    <string name="onboarding_review_failed">连接失败</string>
+    <string name="onboarding_review_pairing_msg">请在网关主机上批准此手机，或复制下方报告。</string>
+    <string name="onboarding_review_failed_msg">复制此报告并发送给您的 Claw。</string>
+    <string name="onboarding_review_error_label">错误</string>
+    <string name="onboarding_review_copy_report">复制 Claw 报告</string>
+    <string name="onboarding_review_tap_connect_again">然后再次点击连接。</string>
+    <string name="onboarding_review_android_version">OpenClaw Android %1$s</string>
+</resources>

@@ -2,8 +2,8 @@
 
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.viewModels
 import androidx.core.view.WindowCompat
 import androidx.compose.material3.Surface
@@ -17,7 +17,7 @@ import clawberry.aiworm.cn.picoclaw.PicoClawViewModel
 import clawberry.aiworm.cn.zeroclaw.ZeroClawViewModel
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
   private val viewModel: MainViewModel by viewModels()
   private val zcViewModel: ZeroClawViewModel by viewModels()
   private val picoViewModel: PicoClawViewModel by viewModels()

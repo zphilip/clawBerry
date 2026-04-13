@@ -37,8 +37,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import clawberry.aiworm.cn.R
 import clawberry.aiworm.cn.gateway.ClawGatewayScanner
 import clawberry.aiworm.cn.gateway.ClawServiceType
 import clawberry.aiworm.cn.gateway.DiscoveredGateway
@@ -99,14 +101,14 @@ internal fun FindClawGatewayCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Find Claw Gateway",
+                    text = stringResource(R.string.find_claw_title),
                     style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                     color = mobileText,
                 )
             }
 
             Text(
-                text = "Scan your local network for gateways broadcasting via mDNS (avahi / Bonjour).",
+                text = stringResource(R.string.find_claw_description),
                 style = mobileCaption1,
                 color = mobileTextTertiary,
             )
@@ -128,11 +130,11 @@ internal fun FindClawGatewayCard(
                         color = mobileAccent,
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scanning…", style = mobileCallout)
+                    Text(stringResource(R.string.find_claw_scanning), style = mobileCallout)
                     Spacer(modifier = Modifier.weight(1f))
                     Icon(
                         imageVector = Icons.Default.Stop,
-                        contentDescription = "Stop scan",
+                        contentDescription = stringResource(R.string.find_claw_stop_scan),
                         modifier = Modifier.size(16.dp),
                     )
                 }
@@ -153,7 +155,7 @@ internal fun FindClawGatewayCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (hasScanned) "Scan Again" else "Start Scan",
+                        text = if (hasScanned) stringResource(R.string.find_claw_scan_again) else stringResource(R.string.find_claw_start_scan),
                         style = mobileCallout.copy(fontWeight = FontWeight.Bold),
                     )
                 }
@@ -162,7 +164,7 @@ internal fun FindClawGatewayCard(
             // ── Results ─────────────────────────────────────────────────
             if (results.isNotEmpty()) {
                 Text(
-                    text = "${results.size} gateway${if (results.size > 1) "s" else ""} found",
+                    text = stringResource(R.string.find_claw_gateways_found, results.size),
                     style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
                     color = mobileSuccess,
                 )
@@ -189,7 +191,7 @@ internal fun FindClawGatewayCard(
                 }
             } else if (hasScanned && !isScanning) {
                 Text(
-                    text = "No gateways found. Make sure your gateway device is on the same network.",
+                    text = stringResource(R.string.find_claw_no_gateways),
                     style = mobileCaption1,
                     color = mobileTextTertiary,
                 )
@@ -272,12 +274,12 @@ private fun DiscoveredGatewayRow(
                     ) {
                         Icon(
                             imageVector = Icons.Default.OpenInBrowser,
-                            contentDescription = "Open in browser",
+                            contentDescription = stringResource(R.string.find_claw_open_in_browser),
                             tint = Color.White,
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = "Open",
+                            text = stringResource(R.string.find_claw_open),
                             style = mobileCaption1.copy(fontWeight = FontWeight.Bold),
                             color = Color.White,
                         )
@@ -294,7 +296,7 @@ private fun DiscoveredGatewayRow(
                     border = BorderStroke(1.dp, LocalMobileColors.current.chipBorderConnecting),
                 ) {
                     Text(
-                        text = "Use",
+                        text = stringResource(R.string.find_claw_use),
                         style = mobileCaption1.copy(fontWeight = FontWeight.Bold),
                         color = mobileAccent,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),

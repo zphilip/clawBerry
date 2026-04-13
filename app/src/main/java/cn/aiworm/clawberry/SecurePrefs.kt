@@ -24,6 +24,7 @@ class SecurePrefs(
     private const val displayNameKey = "node.displayName"
     private const val locationModeKey = "location.enabledMode"
     private const val voiceWakeModeKey = "voiceWake.mode"
+    private const val appLanguageKey = "ui.language"
     private const val plainPrefsName = "openclaw.node"
     private const val securePrefsName = "openclaw.node.secure"
   }
@@ -108,6 +109,9 @@ class SecurePrefs(
   private val _speakerEnabled = MutableStateFlow(plainPrefs.getBoolean("voice.speakerEnabled", true))
   val speakerEnabled: StateFlow<Boolean> = _speakerEnabled
 
+  private val _appLanguage = MutableStateFlow(loadAppLanguage())
+  val appLanguage: StateFlow<AppLanguage> = _appLanguage
+
   fun setLastDiscoveredStableId(value: String) {
     val trimmed = value.trim()
     plainPrefs.edit { putString("gateway.lastDiscoveredStableID", trimmed) }
@@ -178,6 +182,11 @@ class SecurePrefs(
   fun setOnboardingCompleted(value: Boolean) {
     plainPrefs.edit { putBoolean("onboarding.completed", value) }
     _onboardingCompleted.value = value
+  }
+
+  fun setAppLanguage(value: AppLanguage) {
+    plainPrefs.edit { putString(appLanguageKey, value.rawValue) }
+    _appLanguage.value = value
   }
 
   fun setCanvasDebugStatusEnabled(value: Boolean) {
@@ -272,6 +281,11 @@ class SecurePrefs(
     val fresh = UUID.randomUUID().toString()
     plainPrefs.edit { putString("node.instanceId", fresh) }
     return fresh
+  }
+
+  private fun loadAppLanguage(): AppLanguage {
+    val raw = plainPrefs.getString(appLanguageKey, null)
+    return AppLanguage.fromRawValue(raw)
   }
 
   private fun loadOrMigrateDisplayName(context: Context): String {

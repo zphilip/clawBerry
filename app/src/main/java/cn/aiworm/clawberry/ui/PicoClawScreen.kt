@@ -114,14 +114,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import clawberry.aiworm.cn.ui.chat.rememberBase64ImageState
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.stringResource
 
 // ---------------------------------------------------------------------------
 // Sub-tab enum
 // ---------------------------------------------------------------------------
-private enum class PcTab(val label: String, val icon: ImageVector) {
-    Connect(label = "Connect", icon = Icons.Default.CheckCircle),
-    Chat(label = "Chat", icon = Icons.Default.ChatBubble),
-    Settings(label = "Settings", icon = Icons.Default.Settings),
+private enum class PcTab(@param:StringRes val labelRes: Int, val icon: ImageVector) {
+    Connect(labelRes = R.string.common_connect, icon = Icons.Default.CheckCircle),
+    Chat(labelRes = R.string.common_chat, icon = Icons.Default.ChatBubble),
+    Settings(labelRes = R.string.tab_settings, icon = Icons.Default.Settings),
 }
 
 // ---------------------------------------------------------------------------
@@ -207,12 +209,21 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     onClearAndReset = viewModel::clearAndReset,
                 )
             }
+            val pcTabConnect = stringResource(R.string.common_connect)
+            val pcTabChat = stringResource(R.string.common_chat)
+            val pcTabSettings = stringResource(R.string.tab_settings)
             VerticalTabRail(
                 tabs = PcTab.entries,
                 activeTab = activeTab,
                 onSelect = { activeTab = it },
                 icon = { tab -> tab.icon },
-                label = { tab -> tab.label },
+                label = { tab ->
+                    when (tab) {
+                        PcTab.Connect -> pcTabConnect
+                        PcTab.Chat -> pcTabChat
+                        PcTab.Settings -> pcTabSettings
+                    }
+                },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(bottom = if (activeTab == PcTab.Chat) 72.dp else 0.dp),
@@ -236,45 +247,51 @@ private fun PcStatusBar(
     val textColor: Color
     val bgColor: Color
     val borderColor: Color
-    val modeTag = if (mode == PcMode.WebBackend) "web" else "direct"
+    val modeTag = if (mode == PcMode.WebBackend) stringResource(R.string.pc_mode_web) else stringResource(R.string.pc_mode_direct)
+    val pcIdleLabel = stringResource(R.string.pc_status_idle, modeTag)
+    val pcFetchingToken = stringResource(R.string.pc_status_fetching_token)
+    val pcConnecting = stringResource(R.string.pc_status_connecting)
+    val pcReconnecting = stringResource(R.string.pc_status_reconnecting)
+    val pcConnected = stringResource(R.string.pc_status_connected, host, port)
+    val pcError = stringResource(R.string.common_error)
     when (state) {
         PcState.Idle -> {
-            label = "Idle · $modeTag"
+            label = pcIdleLabel
             dotColor = mobileTextTertiary
             textColor = mobileTextSecondary
             bgColor = mobileSurface
             borderColor = mobileBorder
         }
         PcState.FetchingToken -> {
-            label = "Fetching token…"
+            label = pcFetchingToken
             dotColor = mobileAccent
             textColor = mobileAccent
             bgColor = mobileAccentSoft
             borderColor = LocalMobileColors.current.chipBorderConnecting
         }
         PcState.Connecting -> {
-            label = "Connecting…"
+            label = pcConnecting
             dotColor = mobileAccent
             textColor = mobileAccent
             bgColor = mobileAccentSoft
             borderColor = LocalMobileColors.current.chipBorderConnecting
         }
         PcState.Reconnecting -> {
-            label = "Reconnecting…"
+            label = pcReconnecting
             dotColor = Color(0xFFFFA726)   // amber
             textColor = Color(0xFFFFA726)
             bgColor = Color(0x22FFA726)
             borderColor = Color(0x66FFA726)
         }
         PcState.Connected -> {
-            label = "Connected · $host:$port"
+            label = pcConnected
             dotColor = mobileSuccess
             textColor = mobileSuccess
             bgColor = mobileSuccessSoft
             borderColor = LocalMobileColors.current.chipBorderConnected
         }
         PcState.Error -> {
-            label = "Error"
+            label = pcError
             dotColor = mobileDanger
             textColor = mobileDanger
             bgColor = mobileDangerSoft
@@ -459,11 +476,10 @@ private fun PcConnectTab(
     if (showPhotoPermissionDialog) {
         AlertDialog(
             onDismissRequest = { showPhotoPermissionDialog = false },
-            title = { Text("Photo Permission Required", color = mobileText) },
+            title = { Text(stringResource(R.string.pc_photo_permission_title), color = mobileText) },
             text = {
                 Text(
-                    "To scan a QR code from your gallery, ClawBerry needs access to your photos.\n\n" +
-                    "Please grant the permission in Settings → Apps → ClawBerry → Permissions.",
+                    stringResource(R.string.pc_photo_permission_message),
                     color = mobileTextSecondary,
                     style = mobileCallout,
                 )
@@ -477,11 +493,11 @@ private fun PcConnectTab(
                         android.net.Uri.fromParts("package", qrContext.packageName, null)
                     )
                     qrContext.startActivity(intent)
-                }) { Text("Open Settings", color = mobileAccent) }
+                }) { Text(stringResource(R.string.common_open_settings), color = mobileAccent) }
             },
             dismissButton = {
                 TextButton(onClick = { showPhotoPermissionDialog = false }) {
-                    Text("Cancel", color = mobileTextSecondary)
+                    Text(stringResource(R.string.common_cancel), color = mobileTextSecondary)
                 }
             },
         )
@@ -494,7 +510,7 @@ private fun PcConnectTab(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            text = "PicoClaw Gateway",
+            text = stringResource(R.string.pc_gateway_title),
             color = mobileText,
             style = mobileTitle2.copy(fontWeight = FontWeight.Bold),
         )
@@ -566,7 +582,7 @@ private fun PcConnectTab(
             ) {
                 Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Scan QR with Camera", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+                Text(text = stringResource(R.string.pc_scan_qr_camera), style = mobileCallout.copy(fontWeight = FontWeight.Bold))
             }
 
             // Button 2: pick QR from gallery photo
@@ -579,7 +595,7 @@ private fun PcConnectTab(
             ) {
                 Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Pick QR from Gallery", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+                Text(text = stringResource(R.string.pc_pick_qr_gallery), style = mobileCallout.copy(fontWeight = FontWeight.Bold))
             }
 
             // Scan result feedback
@@ -632,7 +648,7 @@ private fun PcConnectTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 HorizontalDivider(modifier = Modifier.weight(1f), color = mobileBorder)
-                Text(text = "or fill manually", color = mobileTextTertiary, style = mobileCaption1)
+                Text(text = stringResource(R.string.pc_or_fill_manually), color = mobileTextTertiary, style = mobileCaption1)
                 HorizontalDivider(modifier = Modifier.weight(1f), color = mobileBorder)
             }
 
@@ -652,10 +668,13 @@ private fun PcConnectTab(
         }
 
         if (state == PcState.FetchingToken || state == PcState.Connecting || state == PcState.Reconnecting) {
+            val pcFetchingTokenMsg = stringResource(R.string.pc_fetching_token)
+            val pcWaitReconnect = stringResource(R.string.pc_waiting_reconnect)
+            val pcOpeningWs = stringResource(R.string.pc_opening_websocket)
             val msg = when (state) {
-                PcState.FetchingToken -> "Fetching token from gateway..."
-                PcState.Reconnecting -> "Waiting to reconnect..."
-                else -> "Opening WebSocket..."
+                PcState.FetchingToken -> pcFetchingTokenMsg
+                PcState.Reconnecting -> pcWaitReconnect
+                else -> pcOpeningWs
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -670,7 +689,7 @@ private fun PcConnectTab(
 
         if (state == PcState.Reconnecting) {
             PcActionButton(
-                label = "Cancel Reconnect",
+                label = stringResource(R.string.pc_cancel_reconnect),
                 icon = Icons.Default.PowerSettingsNew,
                 onClick = onDisconnect,
                 isPrimary = false,
@@ -680,14 +699,14 @@ private fun PcConnectTab(
 
         if (state == PcState.Connected) {
             PcActionButton(
-                label = "Go to Chat",
+                label = stringResource(R.string.pc_go_to_chat),
                 icon = Icons.Default.ChatBubble,
                 onClick = onGoChat,
                 isPrimary = true,
             )
             Spacer(modifier = Modifier.height(4.dp))
             PcActionButton(
-                label = "Disconnect",
+                label = stringResource(R.string.common_disconnect_action),
                 icon = Icons.Default.PowerSettingsNew,
                 onClick = onDisconnect,
                 isPrimary = false,
@@ -726,7 +745,7 @@ private fun PcInfoCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Endpoint", color = mobileTextSecondary, style = mobileCallout)
+                Text(text = stringResource(R.string.common_endpoint), color = mobileTextSecondary, style = mobileCallout)
                 val portLabel = if (mode == PcMode.WebBackend) ":$webPort (web)" else ":$gatewayPort (direct)"
                 Text(
                     text = "$host$portLabel",
@@ -741,9 +760,9 @@ private fun PcInfoCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Mode", color = mobileTextSecondary, style = mobileCallout)
+                Text(text = stringResource(R.string.pc_mode_label), color = mobileTextSecondary, style = mobileCallout)
                 Text(
-                    text = if (mode == PcMode.WebBackend) "Web Backend" else "Direct",
+                    text = if (mode == PcMode.WebBackend) stringResource(R.string.pc_mode_web_backend) else stringResource(R.string.pc_mode_direct_label),
                     color = if (mode == PcMode.WebBackend) mobileAccent else Color(0xFF9C27B0),
                     style = mobileCallout.copy(fontWeight = FontWeight.Medium),
                 )
@@ -753,24 +772,30 @@ private fun PcInfoCard(
             val sdot: String
             val slabel: String
             val scolor: Color
+            val pcInfoNotConnected = stringResource(R.string.pc_info_not_connected)
+            val pcInfoFetchingToken = stringResource(R.string.pc_status_fetching_token)
+            val pcInfoConnecting = stringResource(R.string.pc_status_connecting)
+            val pcInfoReconnecting = stringResource(R.string.pc_status_reconnecting)
+            val pcInfoConnected = stringResource(R.string.pc_state_connected)
+            val pcInfoError = stringResource(R.string.common_error)
             when (state) {
                 PcState.Idle -> {
-                    sdot = "o"; slabel = "Not connected"; scolor = mobileTextTertiary
+                    sdot = "o"; slabel = pcInfoNotConnected; scolor = mobileTextTertiary
                 }
                 PcState.FetchingToken -> {
-                    sdot = "~"; slabel = "Fetching token..."; scolor = mobileAccent
+                    sdot = "~"; slabel = pcInfoFetchingToken; scolor = mobileAccent
                 }
                 PcState.Connecting -> {
-                    sdot = "~"; slabel = "Connecting..."; scolor = mobileAccent
+                    sdot = "~"; slabel = pcInfoConnecting; scolor = mobileAccent
                 }
                 PcState.Reconnecting -> {
-                    sdot = "↻"; slabel = "Reconnecting..."; scolor = Color(0xFFFFA726)
+                    sdot = "↻"; slabel = pcInfoReconnecting; scolor = Color(0xFFFFA726)
                 }
                 PcState.Connected -> {
-                    sdot = "*"; slabel = "Connected"; scolor = Color(0xFF4CAF50)
+                    sdot = "*"; slabel = pcInfoConnected; scolor = Color(0xFF4CAF50)
                 }
                 PcState.Error -> {
-                    sdot = "!"; slabel = "Error"; scolor = Color(0xFFEF5350)
+                    sdot = "!"; slabel = pcInfoError; scolor = Color(0xFFEF5350)
                 }
             }
             Row(
@@ -778,7 +803,7 @@ private fun PcInfoCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "Status", color = mobileTextSecondary, style = mobileCallout)
+                Text(text = stringResource(R.string.common_status), color = mobileTextSecondary, style = mobileCallout)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -795,7 +820,7 @@ private fun PcInfoCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(text = "Token", color = mobileTextSecondary, style = mobileCallout)
+                    Text(text = stringResource(R.string.zc_token), color = mobileTextSecondary, style = mobileCallout)
                     Text(
                         text = if (token.length > 12) "${token.take(8)}...${token.takeLast(4)}" else "********",
                         color = mobileTextTertiary,
@@ -813,18 +838,18 @@ private fun PcInfoCard(
 @Composable
 private fun PcModeSelector(mode: PcMode, onModeChange: (PcMode) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(text = "Connection Mode", color = mobileTextSecondary, style = mobileCaption1)
+        Text(text = stringResource(R.string.pc_connection_mode), color = mobileTextSecondary, style = mobileCaption1)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             PcModeChip(
-                label = "Web Backend",
-                description = "Port 18800",
+                label = stringResource(R.string.pc_mode_web_backend),
+                description = stringResource(R.string.pc_mode_web_port),
                 selected = mode == PcMode.WebBackend,
                 onClick = { onModeChange(PcMode.WebBackend) },
                 modifier = Modifier.weight(1f),
             )
             PcModeChip(
-                label = "Direct",
-                description = "Port 18790",
+                label = stringResource(R.string.pc_mode_direct_label),
+                description = stringResource(R.string.pc_mode_direct_port),
                 selected = mode == PcMode.Direct,
                 onClick = { onModeChange(PcMode.Direct) },
                 modifier = Modifier.weight(1f),
@@ -890,7 +915,7 @@ private fun PcSetupForm(
         PcTextField(
             value = host,
             onValueChange = onHostChange,
-            label = "Gateway Host",
+            label = stringResource(R.string.pc_gateway_host),
             placeholder = "192.168.1.100",
             keyboardType = KeyboardType.Uri,
         )
@@ -901,12 +926,12 @@ private fun PcSetupForm(
                 onValueChange = { v ->
                     onWebPortChange(v.filter(Char::isDigit).take(5).toIntOrNull() ?: webPort)
                 },
-                label = "Web Port",
+                label = stringResource(R.string.pc_web_port),
                 placeholder = "18800",
                 keyboardType = KeyboardType.Number,
             )
             Text(
-                text = "Token will be fetched automatically from the gateway.",
+                text = stringResource(R.string.pc_token_auto_fetch),
                 color = mobileTextTertiary,
                 style = mobileCaption1,
                 modifier = Modifier.padding(horizontal = 2.dp),
@@ -917,15 +942,15 @@ private fun PcSetupForm(
                 onValueChange = { v ->
                     onGatewayPortChange(v.filter(Char::isDigit).take(5).toIntOrNull() ?: gatewayPort)
                 },
-                label = "Gateway Port",
+                label = stringResource(R.string.pc_gateway_port),
                 placeholder = "18790",
                 keyboardType = KeyboardType.Number,
             )
             PcTextField(
                 value = tokenInput,
                 onValueChange = onTokenInputChange,
-                label = "Bearer Token",
-                placeholder = "Paste your token here",
+                label = stringResource(R.string.pc_bearer_token),
+                placeholder = stringResource(R.string.pc_paste_token),
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Go,
                 onImeAction = onConnect,
@@ -940,7 +965,7 @@ private fun PcSetupForm(
         ) {
             Icon(imageVector = Icons.Default.Lan, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text(text = "Connect", style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+            Text(text = stringResource(R.string.common_connect), style = mobileCallout.copy(fontWeight = FontWeight.Bold))
         }
     }
 }
@@ -970,9 +995,9 @@ private fun PcChatTab(
                     tint = mobileTextTertiary,
                     modifier = Modifier.size(40.dp).alpha(0.5f),
                 )
-                Text(text = "Not connected", color = mobileTextTertiary, style = mobileBody)
+                Text(text = stringResource(R.string.pc_not_connected), color = mobileTextTertiary, style = mobileBody)
                 TextButton(onClick = onGoConnect) {
-                    Text(text = "Go to Connect", color = mobileAccent, style = mobileCallout)
+                    Text(text = stringResource(R.string.pc_go_to_connect), color = mobileAccent, style = mobileCallout)
                 }
             }
         }
@@ -1178,7 +1203,7 @@ private fun PcComposer(
             modifier = Modifier.fillMaxWidth(),
             placeholder = {
                 Text(
-                    text = "Message PicoClaw...",
+                    text = stringResource(R.string.pc_message_placeholder),
                     color = mobileTextTertiary,
                     style = mobileCallout,
                 )
@@ -1209,10 +1234,10 @@ private fun PcComposer(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PcIconButton(icon = Icons.Default.AttachFile, label = "Attach", onClick = onPickImages)
-            PcIconButton(icon = Icons.Default.Refresh, label = "Regenerate", onClick = onRefresh)
-            PcIconButton(icon = Icons.Default.Stop, label = "Stop", onClick = onStop)
-            PcIconButton(icon = Icons.Default.Delete, label = "Clear", onClick = onClearChat)
+            PcIconButton(icon = Icons.Default.AttachFile, label = stringResource(R.string.common_attach), onClick = onPickImages)
+            PcIconButton(icon = Icons.Default.Refresh, label = stringResource(R.string.zc_regenerate), onClick = onRefresh)
+            PcIconButton(icon = Icons.Default.Stop, label = stringResource(R.string.zc_stop), onClick = onStop)
+            PcIconButton(icon = Icons.Default.Delete, label = stringResource(R.string.zc_clear_chat), onClick = onClearChat)
             Spacer(Modifier.weight(1f))
             Surface(
                 onClick = { if (canSend) { onSend(text); text = "" } },
@@ -1295,20 +1320,20 @@ private fun PcSettingsTab(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Text(
-            text = "PicoClaw Settings",
+            text = stringResource(R.string.pc_settings_title),
             color = mobileText,
             style = mobileTitle2.copy(fontWeight = FontWeight.Bold),
         )
 
-        PcSettingsSection(title = "Connection Mode") {
+        PcSettingsSection(title = stringResource(R.string.pc_connection_mode)) {
             PcModeSelector(mode = mode, onModeChange = onModeChange)
         }
 
-        PcSettingsSection(title = "Gateway Address") {
+        PcSettingsSection(title = stringResource(R.string.pc_settings_gateway_address)) {
             PcTextField(
                 value = host,
                 onValueChange = onHostChange,
-                label = "Host",
+                label = stringResource(R.string.common_host),
                 placeholder = "192.168.1.100",
                 keyboardType = KeyboardType.Uri,
             )
@@ -1317,7 +1342,7 @@ private fun PcSettingsTab(
                 onValueChange = { v ->
                     onWebPortChange(v.filter(Char::isDigit).take(5).toIntOrNull() ?: webPort)
                 },
-                label = "Web Backend Port",
+                label = stringResource(R.string.pc_settings_web_backend_port),
                 placeholder = "18800",
                 keyboardType = KeyboardType.Number,
             )
@@ -1326,13 +1351,13 @@ private fun PcSettingsTab(
                 onValueChange = { v ->
                     onGatewayPortChange(v.filter(Char::isDigit).take(5).toIntOrNull() ?: gatewayPort)
                 },
-                label = "Direct Gateway Port",
+                label = stringResource(R.string.pc_settings_direct_gateway_port),
                 placeholder = "18790",
                 keyboardType = KeyboardType.Number,
             )
         }
 
-        PcSettingsSection(title = "Authentication Token") {
+        PcSettingsSection(title = stringResource(R.string.pc_settings_auth_token)) {
             if (token != null && token.isNotBlank()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -1344,7 +1369,7 @@ private fun PcSettingsTab(
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Text(text = "Saved Token", color = mobileTextSecondary, style = mobileCaption1)
+                        Text(text = stringResource(R.string.zc_saved_token), color = mobileTextSecondary, style = mobileCaption1)
                         Text(
                             text = if (token.length > 12) "${token.take(12)}...${token.takeLast(4)}" else "******",
                             color = mobileTextTertiary,
@@ -1356,15 +1381,15 @@ private fun PcSettingsTab(
             PcTextField(
                 value = tokenInput,
                 onValueChange = onTokenInputChange,
-                label = "Token (Direct Mode)",
-                placeholder = "Paste bearer token for direct mode",
+                label = stringResource(R.string.pc_settings_token_direct),
+                placeholder = stringResource(R.string.pc_settings_token_placeholder),
                 keyboardType = KeyboardType.Password,
             )
         }
 
-        PcSettingsSection(title = "Reset") {
+        PcSettingsSection(title = stringResource(R.string.pc_settings_reset)) {
             PcActionButton(
-                label = "Clear Token & Disconnect",
+                label = stringResource(R.string.pc_settings_clear_token),
                 icon = Icons.Default.PowerSettingsNew,
                 onClick = onClearAndReset,
                 isPrimary = false,
@@ -1525,7 +1550,7 @@ private fun PcFullscreenImageDialog(base64: String, mimeType: String?, onDismiss
                 }
             }
             Text(
-                "Tap to close",
+                stringResource(R.string.common_tap_to_close),
                 style = mobileCaption1,
                 color = Color.White.copy(alpha = 0.45f),
                 modifier = Modifier

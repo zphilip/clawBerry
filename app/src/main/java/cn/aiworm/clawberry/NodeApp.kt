@@ -19,6 +19,7 @@ class NodeApp : Application() {
 
   override fun onCreate() {
     super.onCreate()
+    AppLocaleManager.apply(prefs.appLanguage.value)
     if (BuildConfig.DEBUG) {
       StrictMode.setThreadPolicy(
         StrictMode.ThreadPolicy.Builder()

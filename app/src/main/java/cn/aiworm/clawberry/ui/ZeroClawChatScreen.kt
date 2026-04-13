@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.ui.res.painterResource
 import clawberry.aiworm.cn.R
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -97,6 +96,8 @@ import androidx.compose.ui.window.DialogProperties
 import org.json.JSONObject
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.filled.AttachFile
@@ -116,10 +117,10 @@ import kotlinx.coroutines.withContext
 // ---------------------------------------------------------------------------
 // Sub-tab enum – mirrors OpenClaw's HomeTab pattern
 // ---------------------------------------------------------------------------
-private enum class ZcTab(val label: String, val icon: ImageVector) {
-    Connect(label = "Connect", icon = Icons.Default.CheckCircle),
-    Chat(label = "Chat", icon = Icons.Default.ChatBubble),
-    Settings(label = "Settings", icon = Icons.Default.Settings),
+private enum class ZcTab(@param:StringRes val labelRes: Int, val icon: ImageVector) {
+    Connect(labelRes = R.string.common_connect, icon = Icons.Default.CheckCircle),
+    Chat(labelRes = R.string.common_chat, icon = Icons.Default.ChatBubble),
+    Settings(labelRes = R.string.tab_settings, icon = Icons.Default.Settings),
 }
 
 // ---------------------------------------------------------------------------
@@ -197,12 +198,21 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                         onClearToken = { viewModel.clearAndReset() },
                     )
             }
+            val zcTabConnect = stringResource(R.string.common_connect)
+            val zcTabChat = stringResource(R.string.common_chat)
+            val zcTabSettings = stringResource(R.string.tab_settings)
             VerticalTabRail(
                 tabs = ZcTab.entries,
                 activeTab = activeTab,
                 onSelect = { activeTab = it },
                 icon = { tab -> tab.icon },
-                label = { tab -> tab.label },
+                label = { tab ->
+                    when (tab) {
+                        ZcTab.Connect -> zcTabConnect
+                        ZcTab.Chat -> zcTabChat
+                        ZcTab.Settings -> zcTabSettings
+                    }
+                },
                 modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
@@ -232,44 +242,50 @@ private fun ZcStatusBar(state: ZcState, host: String, port: Int) {
     val bgColor: Color
     val borderColor: Color
     val label: String
+    val connectedLabel = stringResource(R.string.zc_status_connected, host, port)
+    val connectingLabel = stringResource(R.string.zc_status_connecting)
+    val pairingRequiredLabel = stringResource(R.string.zc_status_pairing_required)
+    val reconnectingLabel = stringResource(R.string.zc_status_reconnecting)
+    val errorLabel = stringResource(R.string.common_error)
+    val offlineLabel = stringResource(R.string.common_offline)
     when (state) {
         ZcState.Connected -> {
-            label = "Connected · $host:$port"
+            label = connectedLabel
             dotColor = mobileSuccess
             textColor = mobileSuccess
             bgColor = mobileSuccessSoft
             borderColor = LocalMobileColors.current.chipBorderConnected
         }
         ZcState.Connecting, ZcState.HealthChecking, ZcState.Pairing -> {
-            label = "Connecting…"
+            label = connectingLabel
             dotColor = mobileAccent
             textColor = mobileAccent
             bgColor = mobileAccentSoft
             borderColor = LocalMobileColors.current.chipBorderConnecting
         }
         ZcState.NeedsPairing -> {
-            label = "Pairing required"
+            label = pairingRequiredLabel
             dotColor = mobileWarning
             textColor = mobileWarning
             bgColor = mobileWarningSoft
             borderColor = LocalMobileColors.current.chipBorderWarning
         }
         ZcState.Reconnecting -> {
-            label = "Reconnecting…"
+            label = reconnectingLabel
             dotColor = Color(0xFFFFA726)
             textColor = Color(0xFFFFA726)
             bgColor = Color(0xFFFFA726).copy(alpha = 0.12f)
             borderColor = Color(0xFFFFA726).copy(alpha = 0.4f)
         }
         ZcState.Error -> {
-            label = "Error"
+            label = errorLabel
             dotColor = mobileDanger
             textColor = mobileDanger
             bgColor = mobileDangerSoft
             borderColor = LocalMobileColors.current.chipBorderError
         }
         ZcState.Idle -> {
-            label = "Offline"
+            label = offlineLabel
             dotColor = mobileTextTertiary
             textColor = mobileTextSecondary
             bgColor = mobileSurface
@@ -353,13 +369,12 @@ private fun ZcConnectTab(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         // Section header
+        val zcActiveReady = stringResource(R.string.zc_gateway_active_ready)
+        val zcConnectDirectly = stringResource(R.string.zc_connect_directly)
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Gateway Connection", style = mobileTitle1, color = mobileText)
+            Text(stringResource(R.string.zc_gateway_connection), style = mobileTitle1, color = mobileText)
             Text(
-                if (state == ZcState.Connected)
-                    "Your ZeroClaw gateway is active and ready."
-                else
-                    "Connect directly to a ZeroClaw gateway.",
+                if (state == ZcState.Connected) zcActiveReady else zcConnectDirectly,
                 style = mobileCallout,
                 color = mobileTextSecondary,
             )
@@ -386,7 +401,7 @@ private fun ZcConnectTab(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
-                            "Connection error",
+                            stringResource(R.string.zc_connection_error),
                             style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                             color = mobileDanger,
                         )
@@ -435,7 +450,7 @@ private fun ZcConnectTab(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Disconnect",
+                        stringResource(R.string.common_disconnect_action),
                         style = mobileHeadline.copy(fontWeight = FontWeight.SemiBold),
                     )
                 }
@@ -455,12 +470,16 @@ private fun ZcConnectTab(
                         strokeWidth = 2.5.dp,
                     )
                     Spacer(Modifier.width(12.dp))
+                    val zcCheckingGateway = stringResource(R.string.zc_checking_gateway)
+                    val zcPairing = stringResource(R.string.zc_pairing)
+                    val zcReconnecting = stringResource(R.string.zc_reconnecting_attempt, reconnectAttempt)
+                    val zcConnecting = stringResource(R.string.zc_status_connecting)
                     Text(
                         text = when (state) {
-                            ZcState.HealthChecking -> "Checking gateway…"
-                            ZcState.Pairing -> "Pairing…"
-                            ZcState.Reconnecting -> "Reconnecting… (attempt $reconnectAttempt)"
-                            else -> "Connecting…"
+                            ZcState.HealthChecking -> zcCheckingGateway
+                            ZcState.Pairing -> zcPairing
+                            ZcState.Reconnecting -> zcReconnecting
+                            else -> zcConnecting
                         },
                         style = mobileCallout,
                         color = if (state == ZcState.Reconnecting) Color(0xFFFFA726) else mobileTextSecondary,
@@ -535,7 +554,7 @@ private fun ZcInfoCard(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "Endpoint",
+                        stringResource(R.string.common_endpoint),
                         style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
                         color = mobileTextSecondary,
                     )
@@ -594,20 +613,28 @@ private fun ZcInfoCard(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "Status",
+                        stringResource(R.string.common_status),
                         style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
                         color = mobileTextSecondary,
                     )
+                    val zcConnectedLabel = stringResource(R.string.zc_state_connected)
+                    val zcCheckGwLabel = stringResource(R.string.zc_checking_gateway)
+                    val zcNeedsPairLabel = stringResource(R.string.zc_status_pairing_required)
+                    val zcPairingLabel = stringResource(R.string.zc_pairing)
+                    val zcConnectingLabel = stringResource(R.string.zc_status_connecting)
+                    val zcReconnectingLabel = stringResource(R.string.zc_status_reconnecting)
+                    val zcErrorLabel = stringResource(R.string.common_error)
+                    val zcOfflineLabel = stringResource(R.string.common_offline)
                     Text(
                         text = when (state) {
-                            ZcState.Connected -> "Connected"
-                            ZcState.HealthChecking -> "Checking gateway…"
-                            ZcState.NeedsPairing -> "Pairing required"
-                            ZcState.Pairing -> "Pairing…"
-                            ZcState.Connecting -> "Connecting…"
-                            ZcState.Reconnecting -> "Reconnecting…"
-                            ZcState.Error -> "Error"
-                            ZcState.Idle -> "Offline"
+                            ZcState.Connected -> zcConnectedLabel
+                            ZcState.HealthChecking -> zcCheckGwLabel
+                            ZcState.NeedsPairing -> zcNeedsPairLabel
+                            ZcState.Pairing -> zcPairingLabel
+                            ZcState.Connecting -> zcConnectingLabel
+                            ZcState.Reconnecting -> zcReconnectingLabel
+                            ZcState.Error -> zcErrorLabel
+                            ZcState.Idle -> zcOfflineLabel
                         },
                         style = mobileBody,
                         color = when (state) {
@@ -635,7 +662,7 @@ private fun ZcInfoCard(
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(
-                            "Token",
+                            stringResource(R.string.zc_token),
                             style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
                             color = mobileTextSecondary,
                         )
@@ -647,7 +674,7 @@ private fun ZcInfoCard(
                     }
                     TextButton(onClick = onClearToken) {
                         Text(
-                            "Clear",
+                            stringResource(R.string.zc_clear),
                             style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
                             color = mobileDanger,
                         )
@@ -678,9 +705,9 @@ private fun ZcPairCard(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Pairing required", style = mobileHeadline, color = mobileWarning)
+            Text(stringResource(R.string.zc_pairing_required), style = mobileHeadline, color = mobileWarning)
             Text(
-                "Get your code:  zeroclaw gateway get-paircode",
+                stringResource(R.string.zc_get_paircode_hint),
                 style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
                 color = mobileTextSecondary,
             )
@@ -698,7 +725,7 @@ private fun ZcPairCard(
             ZcTextField(
                 value = pairCode,
                 onValueChange = onPairCodeChange,
-                label = "Pair code",
+                label = stringResource(R.string.zc_pair_code),
                 keyboardType = KeyboardType.Number,
                 imeAction = ImeAction.Done,
                 onImeAction = { if (pairCode.isNotBlank()) onPair() },
@@ -718,7 +745,7 @@ private fun ZcPairCard(
                 ),
             ) {
                 Text(
-                    "Pair & Connect",
+                    stringResource(R.string.zc_pair_and_connect),
                     style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                 )
             }
@@ -752,7 +779,7 @@ private fun ZcSetupForm(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    "Gateway",
+                    stringResource(R.string.zc_gateway),
                     style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                     color = mobileTextSecondary,
                 )
@@ -760,14 +787,14 @@ private fun ZcSetupForm(
                     ZcTextField(
                         value = host,
                         onValueChange = onHostChange,
-                        label = "Host",
+                        label = stringResource(R.string.common_host),
                         modifier = Modifier.weight(3f),
                         keyboardType = KeyboardType.Uri,
                     )
                     ZcTextField(
                         value = port.toString(),
                         onValueChange = onPortChange,
-                        label = "Port",
+                        label = stringResource(R.string.common_port),
                         modifier = Modifier.weight(1.5f),
                         keyboardType = KeyboardType.Number,
                     )
@@ -776,7 +803,7 @@ private fun ZcSetupForm(
                     ZcTextField(
                         value = tokenInput,
                         onValueChange = onTokenInputChange,
-                        label = "Bearer token (optional – skips pairing)",
+                        label = stringResource(R.string.zc_bearer_token_optional),
                         keyboardType = KeyboardType.Text,
                         imeAction = ImeAction.Done,
                     )
@@ -798,7 +825,7 @@ private fun ZcSetupForm(
             Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                "Connect Gateway",
+                stringResource(R.string.zc_connect_gateway),
                 style = mobileHeadline.copy(fontWeight = FontWeight.Bold),
             )
         }
@@ -831,9 +858,9 @@ private fun ZcChatTab(
                     tint = mobileTextTertiary,
                     modifier = Modifier.size(40.dp),
                 )
-                Text("Not connected", style = mobileHeadline, color = mobileTextSecondary)
+                Text(stringResource(R.string.zc_not_connected), style = mobileHeadline, color = mobileTextSecondary)
                 Text(
-                    "Set up your gateway on the Connect tab first.",
+                    stringResource(R.string.zc_setup_gateway_first),
                     style = mobileCallout,
                     color = mobileTextTertiary,
                 )
@@ -846,7 +873,7 @@ private fun ZcChatTab(
                     ),
                 ) {
                     Text(
-                        "Go to Connect",
+                        stringResource(R.string.zc_go_to_connect),
                         style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                     )
                 }
@@ -954,7 +981,7 @@ private fun ZcComposer(
             onValueChange = { input = it },
             modifier = Modifier.fillMaxWidth(),
             placeholder = {
-                Text("Message…", style = mobileBody, color = mobileTextTertiary)
+                Text(stringResource(R.string.zc_message_placeholder), style = mobileBody, color = mobileTextTertiary)
             },
             textStyle = mobileBody.copy(color = mobileText),
             shape = RoundedCornerShape(16.dp),
@@ -980,22 +1007,22 @@ private fun ZcComposer(
         ) {
             ZcActionButton(
                 icon = Icons.Default.AttachFile,
-                label = "Attach",
+                label = stringResource(R.string.common_attach),
                 onClick = onPickImages,
             )
             ZcActionButton(
                 icon = Icons.Default.Refresh,
-                label = "Regenerate",
+                label = stringResource(R.string.zc_regenerate),
                 onClick = onRefresh,
             )
             ZcActionButton(
                 icon = Icons.Default.Stop,
-                label = "Stop",
+                label = stringResource(R.string.zc_stop),
                 onClick = onStop,
             )
             ZcActionButton(
                 icon = Icons.Default.Delete,
-                label = "Clear chat",
+                label = stringResource(R.string.zc_clear_chat),
                 onClick = onClearChat,
             )
             Spacer(Modifier.weight(1f))
@@ -1023,7 +1050,7 @@ private fun ZcComposer(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    "Send",
+                    stringResource(R.string.common_send),
                     style = mobileHeadline.copy(fontWeight = FontWeight.Bold),
                 )
             }
@@ -1112,7 +1139,7 @@ private fun ZcSettingsTab(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Settings", style = mobileTitle1, color = mobileText)
+        Text(stringResource(R.string.tab_settings), style = mobileTitle1, color = mobileText)
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -1125,7 +1152,7 @@ private fun ZcSettingsTab(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    "Gateway address",
+                    stringResource(R.string.zc_gateway_address),
                     style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                     color = mobileTextSecondary,
                 )
@@ -1133,14 +1160,14 @@ private fun ZcSettingsTab(
                     ZcTextField(
                         value = host,
                         onValueChange = onHostChange,
-                        label = "Host",
+                        label = stringResource(R.string.common_host),
                         modifier = Modifier.weight(3f),
                         keyboardType = KeyboardType.Uri,
                     )
                     ZcTextField(
                         value = port.toString(),
                         onValueChange = onPortChange,
-                        label = "Port",
+                        label = stringResource(R.string.common_port),
                         modifier = Modifier.weight(1.5f),
                         keyboardType = KeyboardType.Number,
                     )
@@ -1167,7 +1194,7 @@ private fun ZcSettingsTab(
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(
-                            "Saved token",
+                            stringResource(R.string.zc_saved_token),
                             style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
                             color = mobileTextSecondary,
                         )
@@ -1179,14 +1206,14 @@ private fun ZcSettingsTab(
                     }
                     TextButton(onClick = onClearToken) {
                         Text(
-                            "Clear & Reset",
+                            stringResource(R.string.zc_clear_and_reset),
                             style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                             color = mobileDanger,
                         )
                     }
                 } else {
                     Text(
-                        "No token saved",
+                        stringResource(R.string.zc_no_token_saved),
                         style = mobileCallout,
                         color = mobileTextTertiary,
                     )
@@ -1495,7 +1522,7 @@ private fun FullscreenImageDialog(base64: String, mimeType: String?, onDismiss: 
                 }
             }
             Text(
-                "Tap to close",
+                stringResource(R.string.common_tap_to_close),
                 style = mobileCaption1,
                 color = Color.White.copy(alpha = 0.45f),
                 modifier = Modifier
@@ -1527,9 +1554,9 @@ private fun ZcSessionPickerDialog(
             ) {
                 // Header
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Resume a session?", style = mobileTitle2, color = mobileText)
+                    Text(stringResource(R.string.zc_resume_session), style = mobileTitle2, color = mobileText)
                     Text(
-                        "Restore a previous conversation, or start fresh.",
+                        stringResource(R.string.zc_resume_session_subtitle),
                         style = mobileCallout,
                         color = mobileTextSecondary,
                     )
@@ -1553,7 +1580,7 @@ private fun ZcSessionPickerDialog(
                                 verticalArrangement = Arrangement.spacedBy(3.dp),
                             ) {
                                 Text(
-                                    "${info.messageCount} messages",
+                                    stringResource(R.string.zc_session_message_count, info.messageCount),
                                     style = mobileCallout.copy(fontWeight = FontWeight.Medium),
                                     color = mobileText,
                                 )
@@ -1573,7 +1600,7 @@ private fun ZcSessionPickerDialog(
                                     )
                                 } else {
                                     Text(
-                                        "ID: ${info.id.take(12)}…",
+                                        stringResource(R.string.zc_session_id_prefix, info.id.take(12)),
                                         style = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
                                         color = mobileTextTertiary,
                                         maxLines = 1,
@@ -1597,7 +1624,7 @@ private fun ZcSessionPickerDialog(
                     ),
                 ) {
                     Text(
-                        "Start New Session",
+                        stringResource(R.string.zc_start_new_session),
                         style = mobileHeadline.copy(fontWeight = FontWeight.SemiBold),
                     )
                 }
@@ -1624,7 +1651,7 @@ private fun ZcRestoringDialog() {
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp,
                 )
-                Text("Restoring session history…", style = mobileCallout, color = mobileText)
+                Text(stringResource(R.string.zc_restoring_session), style = mobileCallout, color = mobileText)
             }
         }
     }

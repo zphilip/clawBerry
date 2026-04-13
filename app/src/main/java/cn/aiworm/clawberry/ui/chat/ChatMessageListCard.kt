@@ -16,9 +16,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import clawberry.aiworm.cn.chat.ChatMessage
 import clawberry.aiworm.cn.chat.ChatPendingToolCall
+import clawberry.aiworm.cn.R
 import clawberry.aiworm.cn.ui.mobileBorder
 import clawberry.aiworm.cn.ui.mobileCallout
 import clawberry.aiworm.cn.ui.mobileCardSurface
@@ -101,13 +103,13 @@ private fun EmptyChatHint(modifier: Modifier = Modifier, healthOk: Boolean) {
       modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
       verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-      Text("No messages yet", style = mobileHeadline, color = mobileText)
+      Text(stringResource(R.string.openclaw_no_messages_yet), style = mobileHeadline, color = mobileText)
       Text(
         text =
           if (healthOk) {
-            "Send the first prompt to start this session."
+            stringResource(R.string.openclaw_send_first_prompt)
           } else {
-            "Connect gateway first, then return to chat."
+            stringResource(R.string.openclaw_connect_gateway_first)
           },
         style = mobileCallout,
         color = mobileTextSecondary,
