@@ -29,7 +29,13 @@ class NodeApp : Application() {
       )
       StrictMode.setVmPolicy(
         StrictMode.VmPolicy.Builder()
-          .detectAll()
+          // detectAll() minus detectUntaggedSockets() — OkHttp's internal TaskRunner
+          // and Firebase's CctTransportBackend create sockets on threads we can't tag.
+          .detectLeakedSqlLiteObjects()
+          .detectLeakedClosableObjects()
+          .detectLeakedRegistrationObjects()
+          .detectActivityLeaks()
+          .detectFileUriExposure()
           .penaltyLog()
           .build(),
       )

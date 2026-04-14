@@ -112,6 +112,17 @@ class SecurePrefs(
   private val _appLanguage = MutableStateFlow(loadAppLanguage())
   val appLanguage: StateFlow<AppLanguage> = _appLanguage
 
+  private val _asrUrl = MutableStateFlow(
+    plainPrefs.getString("asr.url", "wss://asr.aiworm.cn:443") ?: "wss://asr.aiworm.cn:443"
+  )
+  val asrUrl: StateFlow<String> = _asrUrl
+
+  fun setAsrUrl(value: String) {
+    val trimmed = value.trim()
+    plainPrefs.edit { putString("asr.url", trimmed) }
+    _asrUrl.value = trimmed
+  }
+
   fun setLastDiscoveredStableId(value: String) {
     val trimmed = value.trim()
     plainPrefs.edit { putString("gateway.lastDiscoveredStableID", trimmed) }

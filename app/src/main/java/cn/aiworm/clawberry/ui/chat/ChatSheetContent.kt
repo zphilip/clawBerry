@@ -60,6 +60,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   val streamingAssistantText by viewModel.chatStreamingAssistantText.collectAsState()
   val pendingToolCalls by viewModel.chatPendingToolCalls.collectAsState()
   val sessions by viewModel.chatSessions.collectAsState()
+  val asrUrl by viewModel.asrUrl.collectAsState()
 
   LaunchedEffect(mainSessionKey) {
     viewModel.loadChat(mainSessionKey)
@@ -123,6 +124,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
         thinkingLevel = thinkingLevel,
         pendingRunCount = pendingRunCount,
         attachments = attachments,
+        asrUrl = asrUrl,
         onPickImages = { pickImages.launch("image/*") },
         onRemoveAttachment = { id -> attachments.removeAll { it.id == id } },
         onSetThinkingLevel = { level -> viewModel.setChatThinkingLevel(level) },

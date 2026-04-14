@@ -85,6 +85,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val speakerEnabled: StateFlow<Boolean> = prefs.speakerEnabled
   val micEnabled: StateFlow<Boolean> = prefs.talkEnabled
   val appLanguage: StateFlow<AppLanguage> = prefs.appLanguage
+  val asrUrl: StateFlow<String> = prefs.asrUrl
 
   val micCooldown: StateFlow<Boolean> = runtimeState(initial = false) { it.micCooldown }
   val micStatusText: StateFlow<String> = runtimeState(initial = "Mic off") { it.micStatusText }
@@ -201,6 +202,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun setAppLanguage(value: AppLanguage) {
     prefs.setAppLanguage(value)
     AppLocaleManager.apply(value)
+  }
+
+  fun setAsrUrl(value: String) {
+    prefs.setAsrUrl(value)
   }
 
   fun setVoiceScreenActive(active: Boolean) {

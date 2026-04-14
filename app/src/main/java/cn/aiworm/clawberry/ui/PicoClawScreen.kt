@@ -54,6 +54,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -76,6 +78,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -104,6 +107,8 @@ import clawberry.aiworm.cn.picoclaw.PicoClawViewModel
 import clawberry.aiworm.cn.ui.chat.ChatMarkdown
 import clawberry.aiworm.cn.ui.chat.PendingImageAttachment
 import clawberry.aiworm.cn.ui.chat.loadSizedImageAttachment
+import clawberry.aiworm.cn.asr.AsrClient
+import clawberry.aiworm.cn.asr.VoiceRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -183,6 +188,9 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                 PcTab.Chat -> PcChatTab(
                     isConnected = state == PcState.Connected,
                     messages = messages,
+                    asrUrl = LocalContext.current
+                        .getSharedPreferences("openclaw.node", android.content.Context.MODE_PRIVATE)
+                        .getString("asr.url", "wss://asr.aiworm.cn:443") ?: "wss://asr.aiworm.cn:443",
                     onSend = { text, atts ->
                         viewModel.sendMessage(
                             text,
@@ -977,6 +985,7 @@ private fun PcSetupForm(
 private fun PcChatTab(
     isConnected: Boolean,
     messages: List<PcChatMessage>,
+    asrUrl: String,
     onSend: (String, List<PendingImageAttachment>) -> Unit,
     onClearChat: () -> Unit,
     onRefresh: () -> Unit,
@@ -1041,6 +1050,7 @@ private fun PcChatTab(
         HorizontalDivider(color = mobileBorder, thickness = 0.5.dp)
         PcComposer(
             attachments = attachments,
+            asrUrl = asrUrl,
             onPickImages = { pickImages.launch("image/*") },
             onRemoveAttachment = { id -> attachments.removeAll { it.id == id } },
             onClearChat = onClearChat,
@@ -1164,6 +1174,7 @@ private fun PcTypingIndicator() {
 @Composable
 private fun PcComposer(
     attachments: List<PendingImageAttachment>,
+    asrUrl: String,
     onPickImages: () -> Unit,
     onRemoveAttachment: (id: String) -> Unit,
     onClearChat: () -> Unit,
@@ -1172,6 +1183,13 @@ private fun PcComposer(
     onSend: (String) -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf("") }
+    var voiceState by remember { mutableStateOf(clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle) }
+    var capturedPcm by remember { mutableStateOf<ByteArray?>(null) }
+    var asrMode by rememberSaveable { mutableStateOf("2pass") }
+    val voiceRecorder = remember { VoiceRecorder() }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    DisposableEffect(Unit) { onDispose { voiceRecorder.release() } }
     val canSend = text.isNotBlank() || attachments.isNotEmpty()
 
     Column(
@@ -1229,6 +1247,13 @@ private fun PcComposer(
             textStyle = mobileCallout,
         )
 
+        capturedPcm?.let { pcm ->
+            clawberry.aiworm.cn.ui.chat.VoiceClipBar(
+                pcm = pcm,
+                isTranscribing = voiceState == clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing,
+            )
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -1238,6 +1263,120 @@ private fun PcComposer(
             PcIconButton(icon = Icons.Default.Refresh, label = stringResource(R.string.zc_regenerate), onClick = onRefresh)
             PcIconButton(icon = Icons.Default.Stop, label = stringResource(R.string.zc_stop), onClick = onStop)
             PcIconButton(icon = Icons.Default.Delete, label = stringResource(R.string.zc_clear_chat), onClick = onClearChat)
+            // ── Mic / Voice input button ──────────────────────────────────
+            PcIconButton(
+                icon = when (voiceState) {
+                    clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording -> Icons.Default.MicOff
+                    else -> Icons.Default.Mic
+                },
+                label = when (voiceState) {
+                    clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle -> stringResource(R.string.asr_mic_start)
+                    clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording -> stringResource(R.string.asr_recording)
+                    clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing -> stringResource(R.string.asr_transcribing)
+                    clawberry.aiworm.cn.ui.chat.AsrVoiceState.Failed -> stringResource(R.string.asr_failed)
+                },
+                containerColor = if (voiceState == clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording)
+                    Color(0xFFE53935) else mobileCardSurface,
+                iconTint = if (voiceState == clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording)
+                    Color.White else mobileTextSecondary,
+                onClick = {
+                    when (voiceState) {
+                        clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle -> {
+                            capturedPcm = null
+                            voiceRecorder.start()
+                            voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
+                        }
+                        clawberry.aiworm.cn.ui.chat.AsrVoiceState.Failed -> {
+                            val pcmToRetry = capturedPcm
+                            if (pcmToRetry != null) {
+                                voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing
+                                scope.launch(Dispatchers.IO) {
+                                    val result = AsrClient.transcribe(asrUrl, pcmToRetry, asrMode)
+                                    withContext(Dispatchers.Main) {
+                                        if (!result.isNullOrBlank()) {
+                                            text = result
+                                            capturedPcm = null
+                                            voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle
+                                            android.widget.Toast.makeText(
+                                                context, context.getString(R.string.asr_success),
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Failed
+                                            android.widget.Toast.makeText(
+                                                context, context.getString(R.string.asr_failed_message),
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            } else {
+                                voiceRecorder.start()
+                                voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
+                            }
+                        }
+                        clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording -> {
+                            voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing
+                            scope.launch(Dispatchers.IO) {
+                                val pcm = voiceRecorder.stop()
+                                if (VoiceRecorder.isSilent(pcm)) {
+                                    withContext(Dispatchers.Main) {
+                                        voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle
+                                        android.widget.Toast.makeText(
+                                            context, context.getString(R.string.asr_no_voice),
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                    return@launch
+                                }
+                                withContext(Dispatchers.Main) { capturedPcm = pcm }
+                                val result = AsrClient.transcribe(asrUrl, pcm, asrMode)
+                                withContext(Dispatchers.Main) {
+                                    if (!result.isNullOrBlank()) {
+                                        text = result
+                                        capturedPcm = null
+                                        voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle
+                                        android.widget.Toast.makeText(
+                                            context, context.getString(R.string.asr_success),
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else {
+                                        voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Failed
+                                        android.widget.Toast.makeText(
+                                            context, context.getString(R.string.asr_failed_message),
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                        }
+                        clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing -> Unit
+                    }
+                },
+            )
+
+            // ── ASR mode selector (tap to cycle: 2pass → offline → online) ──
+            Surface(
+                onClick = {
+                    asrMode = when (asrMode) { "2pass" -> "offline"; "offline" -> "online"; else -> "2pass" }
+                },
+                modifier = Modifier.height(44.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = mobileCardSurface,
+                border = BorderStroke(1.dp, mobileBorder),
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                ) {
+                    Text(
+                        text = asrMode,
+                        style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+                        color = mobileTextSecondary,
+                    )
+                }
+            }
+
             Spacer(Modifier.weight(1f))
             Surface(
                 onClick = { if (canSend) { onSend(text); text = "" } },
@@ -1455,20 +1594,22 @@ private fun PcTextField(
 private fun PcIconButton(
     icon: ImageVector,
     label: String,
+    containerColor: Color = mobileCardSurface,
+    iconTint: Color = mobileTextSecondary,
     onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         modifier = Modifier.size(44.dp),
         shape = RoundedCornerShape(12.dp),
-        color = mobileCardSurface,
+        color = containerColor,
         border = BorderStroke(1.dp, mobileBorder),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = mobileTextSecondary,
+                tint = iconTint,
                 modifier = Modifier.size(18.dp),
             )
         }

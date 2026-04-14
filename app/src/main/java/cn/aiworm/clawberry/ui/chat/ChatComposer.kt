@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -33,20 +38,25 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import clawberry.aiworm.cn.R
+import clawberry.aiworm.cn.asr.AsrClient
+import clawberry.aiworm.cn.asr.VoiceRecorder
 import clawberry.aiworm.cn.ui.mobileAccent
 import clawberry.aiworm.cn.ui.mobileAccentBorderStrong
 import clawberry.aiworm.cn.ui.mobileAccentSoft
@@ -61,12 +71,16 @@ import clawberry.aiworm.cn.ui.mobileText
 import clawberry.aiworm.cn.ui.mobileTextSecondary
 import clawberry.aiworm.cn.ui.mobileTextTertiary
 
+/** Voice-input state for the push-to-talk mic button. */
+internal enum class AsrVoiceState { Idle, Recording, Transcribing, Failed }
+
 @Composable
 fun ChatComposer(
   healthOk: Boolean,
   thinkingLevel: String,
   pendingRunCount: Int,
   attachments: List<PendingImageAttachment>,
+  asrUrl: String,
   onPickImages: () -> Unit,
   onRemoveAttachment: (id: String) -> Unit,
   onSetThinkingLevel: (level: String) -> Unit,
@@ -76,6 +90,13 @@ fun ChatComposer(
 ) {
   var input by rememberSaveable { mutableStateOf("") }
   var showThinkingMenu by remember { mutableStateOf(false) }
+  var voiceState by remember { mutableStateOf(AsrVoiceState.Idle) }
+  var capturedPcm by remember { mutableStateOf<ByteArray?>(null) }
+  var asrMode by rememberSaveable { mutableStateOf("2pass") }
+  val voiceRecorder = remember { VoiceRecorder() }
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
+  DisposableEffect(Unit) { onDispose { voiceRecorder.release() } }
 
   val canSend = pendingRunCount == 0 && (input.trim().isNotEmpty() || attachments.isNotEmpty()) && healthOk
   val sendBusy = pendingRunCount > 0
@@ -102,6 +123,14 @@ fun ChatComposer(
         text = stringResource(R.string.openclaw_gateway_offline_connect_first),
         style = mobileCallout,
         color = clawberry.aiworm.cn.ui.mobileWarning,
+      )
+    }
+
+    capturedPcm?.let { pcm ->
+      VoiceClipBar(
+        pcm = pcm,
+        isTranscribing = voiceState == AsrVoiceState.Transcribing,
+        modifier = Modifier.fillMaxWidth(),
       )
     }
 
@@ -170,6 +199,122 @@ fun ChatComposer(
         onClick = onAbort,
       )
 
+      // ── Mic / Voice input button ──────────────────────────────────────────
+      SecondaryActionButton(
+        label = when (voiceState) {
+          AsrVoiceState.Idle -> stringResource(R.string.asr_mic_start)
+          AsrVoiceState.Recording -> stringResource(R.string.asr_recording)
+          AsrVoiceState.Transcribing -> stringResource(R.string.asr_transcribing)
+          AsrVoiceState.Failed -> stringResource(R.string.asr_failed)
+        },
+        icon = when (voiceState) {
+          AsrVoiceState.Idle, AsrVoiceState.Failed -> Icons.Default.Mic
+          AsrVoiceState.Recording -> Icons.Default.MicOff
+          AsrVoiceState.Transcribing -> Icons.Default.Mic
+        },
+        containerColor = if (voiceState == AsrVoiceState.Recording) Color(0xFFE53935) else mobileCardSurface,
+        iconTint = if (voiceState == AsrVoiceState.Recording) Color.White else mobileTextSecondary,
+        enabled = voiceState != AsrVoiceState.Transcribing,
+        compact = true,
+        onClick = {
+          when (voiceState) {
+            AsrVoiceState.Idle -> {
+              capturedPcm = null
+              voiceRecorder.start()
+              voiceState = AsrVoiceState.Recording
+            }
+            AsrVoiceState.Failed -> {
+              val pcmToRetry = capturedPcm
+              if (pcmToRetry != null) {
+                // Re-send the same clip to ASR without re-recording
+                voiceState = AsrVoiceState.Transcribing
+                scope.launch(Dispatchers.IO) {
+                  val text = AsrClient.transcribe(asrUrl, pcmToRetry, asrMode)
+                  withContext(Dispatchers.Main) {
+                    if (!text.isNullOrBlank()) {
+                      input = text
+                      capturedPcm = null
+                      voiceState = AsrVoiceState.Idle
+                      android.widget.Toast.makeText(
+                        context, context.getString(R.string.asr_success),
+                        android.widget.Toast.LENGTH_SHORT
+                      ).show()
+                    } else {
+                      voiceState = AsrVoiceState.Failed
+                      android.widget.Toast.makeText(
+                        context, context.getString(R.string.asr_failed_message),
+                        android.widget.Toast.LENGTH_SHORT
+                      ).show()
+                    }
+                  }
+                }
+              } else {
+                voiceRecorder.start()
+                voiceState = AsrVoiceState.Recording
+              }
+            }
+            AsrVoiceState.Recording -> {
+              voiceState = AsrVoiceState.Transcribing
+              scope.launch(Dispatchers.IO) {
+                val pcm = voiceRecorder.stop()
+                if (VoiceRecorder.isSilent(pcm)) {
+                  withContext(Dispatchers.Main) {
+                    voiceState = AsrVoiceState.Idle
+                    android.widget.Toast.makeText(
+                      context, context.getString(R.string.asr_no_voice),
+                      android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                  }
+                  return@launch
+                }
+                withContext(Dispatchers.Main) { capturedPcm = pcm }
+                val text = AsrClient.transcribe(asrUrl, pcm, asrMode)
+                withContext(Dispatchers.Main) {
+                  if (!text.isNullOrBlank()) {
+                    input = text
+                    capturedPcm = null
+                    voiceState = AsrVoiceState.Idle
+                    android.widget.Toast.makeText(
+                      context, context.getString(R.string.asr_success),
+                      android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                  } else {
+                    voiceState = AsrVoiceState.Failed
+                    android.widget.Toast.makeText(
+                      context, context.getString(R.string.asr_failed_message),
+                      android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                  }
+                }
+              }
+            }
+            AsrVoiceState.Transcribing -> Unit
+          }
+        },
+      )
+
+      // ── ASR mode selector (tap to cycle: 2pass → offline → online) ──────
+      Surface(
+        onClick = {
+          asrMode = when (asrMode) { "2pass" -> "offline"; "offline" -> "online"; else -> "2pass" }
+        },
+        modifier = Modifier.height(44.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = mobileCardSurface,
+        border = BorderStroke(1.dp, mobileBorderStrong),
+      ) {
+        Box(
+          contentAlignment = Alignment.Center,
+          modifier = Modifier.padding(horizontal = 10.dp),
+        ) {
+          Text(
+            text = asrMode,
+            style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+            color = mobileTextSecondary,
+          )
+        }
+      }
+
       Spacer(modifier = Modifier.weight(1f))
 
       Button(
@@ -214,6 +359,8 @@ private fun SecondaryActionButton(
   icon: androidx.compose.ui.graphics.vector.ImageVector,
   enabled: Boolean,
   compact: Boolean = false,
+  containerColor: Color = mobileCardSurface,
+  iconTint: Color = mobileTextSecondary,
   onClick: () -> Unit,
 ) {
   Button(
@@ -223,15 +370,15 @@ private fun SecondaryActionButton(
     shape = RoundedCornerShape(14.dp),
     colors =
       ButtonDefaults.buttonColors(
-        containerColor = mobileCardSurface,
-        contentColor = mobileTextSecondary,
+        containerColor = containerColor,
+        contentColor = iconTint,
         disabledContainerColor = mobileCardSurface,
         disabledContentColor = mobileTextTertiary,
       ),
     border = BorderStroke(1.dp, mobileBorderStrong),
     contentPadding = if (compact) PaddingValues(0.dp) else ButtonDefaults.ContentPadding,
   ) {
-    Icon(icon, contentDescription = label, modifier = Modifier.size(14.dp))
+    Icon(icon, contentDescription = label, modifier = Modifier.size(14.dp), tint = iconTint)
     if (!compact) {
       Spacer(modifier = Modifier.width(5.dp))
       Text(

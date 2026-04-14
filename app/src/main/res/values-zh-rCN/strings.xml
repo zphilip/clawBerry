@@ -39,6 +39,7 @@
     <string name="common_port">端口</string>
     <string name="common_attach">附件</string>
     <string name="common_send">发送</string>
+    <string name="common_save">保存</string>
     <string name="common_open_settings">打开设置</string>
 
     <!-- OpenClaw Connect tab -->
@@ -285,6 +286,18 @@
     <string name="settings_pref_prevent_sleep_subtitle">保持屏幕在开启时常亮。</string>
     <string name="settings_pref_debug_canvas">调试画布</string>
     <string name="settings_pref_debug_canvas_subtitle">在画布上显示状态叠加层。</string>
+
+    <!-- Settings – ASR / Voice input -->
+    <string name="settings_asr_title">ASR / 语音输入</string>
+    <string name="settings_asr_url_label">ASR 服务器地址</string>
+    <string name="settings_asr_url_subtitle">用于语音转录的 FunASR WebSocket 端点。</string>
+    <string name="asr_mic_start">语音输入</string>
+    <string name="asr_recording">录音中…</string>
+    <string name="asr_transcribing">转录中…</string>
+    <string name="asr_failed">语音输入失败</string>
+    <string name="asr_success">文字已填入输入框，点击发送即可</string>
+    <string name="asr_failed_message">语音识别失败，请点击麦克风重试</string>
+    <string name="asr_no_voice">未检测到声音</string>
 
     <!-- Onboarding Flow -->
     <string name="onboarding_mobile_setup">移动端设置</string>

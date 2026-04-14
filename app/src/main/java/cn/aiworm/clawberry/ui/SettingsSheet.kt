@@ -92,6 +92,8 @@ fun SettingsSheet(viewModel: MainViewModel) {
   val preventSleep by viewModel.preventSleep.collectAsState()
   val canvasDebugStatusEnabled by viewModel.canvasDebugStatusEnabled.collectAsState()
   val appLanguage by viewModel.appLanguage.collectAsState()
+  val asrUrl by viewModel.asrUrl.collectAsState()
+  var asrUrlDraft by rememberSaveable(asrUrl) { mutableStateOf(asrUrl) }
 
   val listState = rememberLazyListState()
   val deviceModel =
@@ -923,6 +925,51 @@ fun SettingsSheet(viewModel: MainViewModel) {
                 checked = canvasDebugStatusEnabled,
                 onCheckedChange = viewModel::setCanvasDebugStatusEnabled,
               )
+            },
+          )
+        }
+      }
+
+      // ── ASR / Voice Input ──
+      item {
+        Text(
+          stringResource(R.string.settings_asr_title),
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        Column(modifier = Modifier.settingsRowModifier()) {
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text(stringResource(R.string.settings_asr_url_label), style = mobileHeadline) },
+            supportingContent = { Text(stringResource(R.string.settings_asr_url_subtitle), style = mobileCallout) },
+          )
+          OutlinedTextField(
+            value = asrUrlDraft,
+            onValueChange = { asrUrlDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            singleLine = true,
+            placeholder = { Text("wss://asr.aiworm.cn:443", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1.copy(fontFamily = FontFamily.Monospace),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            trailingIcon = {
+              if (asrUrlDraft.trim() != asrUrl) {
+                Button(
+                  onClick = { viewModel.setAsrUrl(asrUrlDraft) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
             },
           )
         }

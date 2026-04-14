@@ -39,6 +39,7 @@
     <string name="common_port">Port</string>
     <string name="common_attach">Attach</string>
     <string name="common_send">Send</string>
+    <string name="common_save">Save</string>
     <string name="common_open_settings">Open Settings</string>
 
     <!-- OpenClaw Connect tab -->
@@ -286,6 +287,18 @@
     <string name="settings_pref_prevent_sleep_subtitle">Keep screen awake while open.</string>
     <string name="settings_pref_debug_canvas">Debug Canvas</string>
     <string name="settings_pref_debug_canvas_subtitle">Show status overlay on canvas.</string>
+
+    <!-- Settings – ASR / Voice input -->
+    <string name="settings_asr_title">ASR / VOICE INPUT</string>
+    <string name="settings_asr_url_label">ASR Server URL</string>
+    <string name="settings_asr_url_subtitle">FunASR WebSocket endpoint for voice transcription.</string>
+    <string name="asr_mic_start">Voice input</string>
+    <string name="asr_recording">Recording…</string>
+    <string name="asr_transcribing">Transcribing…</string>
+    <string name="asr_failed">Voice input failed</string>
+    <string name="asr_success">Text filled — tap Send to submit</string>
+    <string name="asr_failed_message">Speech recognition failed, tap mic to retry</string>
+    <string name="asr_no_voice">No voice detected</string>
 
     <!-- Onboarding Flow -->
     <string name="onboarding_mobile_setup">Mobile Setup</string>
