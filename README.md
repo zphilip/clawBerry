@@ -1,9 +1,63 @@
 # ClawBerry
 
-An Android companion app built on top of [OpenClaw](https://github.com/openclaw/openclaw) with additional integrations for ZeroClaw and PicoClaw gateways.
+An Android companion app for [OpenClaw](https://github.com/openclaw/openclaw) with extended support for **ZeroClaw** and **PicoClaw** AI gateways.
 
 > **Based on** [openclaw/openclaw](https://github.com/openclaw/openclaw/tree/main/apps/android) — MIT License, © 2025 Peter Steinberger.
-> This fork adds ZeroClaw/PicoClaw support, custom UI, QR onboarding, and other enhancements.
+> This fork adds ZeroClaw/PicoClaw support, custom UI, QR onboarding, voice input, and other enhancements.
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="assets/Screenshot_20260401-111019.jpg" width="180"/></td>
+    <td align="center"><img src="assets/Screenshot_20260401-111033.jpg" width="180"/></td>
+    <td align="center"><img src="assets/Screenshot_20260407-210042.jpg" width="180"/></td>
+    <td align="center"><img src="assets/Screenshot_20260407-211201.jpg" width="180"/></td>
+    <td align="center"><img src="assets/Screenshot_20260412-184404.jpg" width="180"/></td>
+  </tr>
+</table>
+
+---
+
+## Main Features
+
+### 🐻 ZeroClaw Chat
+Connect to a **ZeroClaw** AI gateway and chat with streaming responses. Supports:
+- Direct connection (host + port + token) or **via ClawProxy** (port 18780, no token needed)
+- Streaming chunks with tool-call and tool-result display
+- Session management — restore or start a new session on reconnect
+- ASR voice input with language selection and press-to-talk
+
+### 🐾 PicoClaw Chat
+Connect to a **PicoClaw** AI gateway in three modes:
+- **Web Backend** — fetches a session token automatically over HTTP
+- **Direct** — user supplies a token for direct WebSocket access
+- **Via Proxy** — connects through ClawProxy (port 18780, no token or pairing needed)
+- Streaming message updates, typing indicator, ASR voice input
+
+### 🤖 OpenClaw
+Original OpenClaw gateway integration — pair your device via setup code or QR scan, then access the full command set (SMS, calls, camera, notifications, screen canvas, and more).
+
+### 🎤 Voice Input (ASR)
+All three chat tabs include press-to-talk voice input powered by the on-device Speech Recogniser:
+- Language selector persisted per tab
+- Recognised text appended to or replaces the current input draft
+
+### 📱 Screen / Canvas
+A2UI canvas surface displayed in the **Screen** tab — supports interactive canvas commands from the gateway.
+
+### 🔗 ClawProxy Support
+All gateway tabs support transparent **ClawProxy** mode:
+- Proxy port default: **18780**
+- No token or pairing code required — the proxy handles authentication on its side
+- Wire format is identical to a direct gateway connection
+
+### 🔒 Security
+- Biometric lock support
+- Encrypted token persistence
+- Token stripped from WebSocket headers when connecting via proxy
 
 ---
 

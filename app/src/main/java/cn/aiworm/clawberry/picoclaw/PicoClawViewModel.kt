@@ -32,7 +32,7 @@ enum class PcState {
     Error,
 }
 
-enum class PcMode { WebBackend, Direct }
+enum class PcMode { WebBackend, Direct, Proxy }
 
 // ---------------------------------------------------------------------------
 // Attachment model (mirrors ZeroClaw's for UI parity)
@@ -73,8 +73,13 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     val host = MutableStateFlow(prefs.getString("host", "127.0.0.1") ?: "127.0.0.1")
     val webPort = MutableStateFlow(prefs.getInt("webPort", 18800))
     val gatewayPort = MutableStateFlow(prefs.getInt("gatewayPort", 18790))
+    val proxyPort   = MutableStateFlow(prefs.getInt("proxyPort", 18780))
     val mode = MutableStateFlow(
-        if (prefs.getString("mode", "web") == "direct") PcMode.Direct else PcMode.WebBackend
+        when (prefs.getString("mode", "web")) {
+            "direct" -> PcMode.Direct
+            "proxy"  -> PcMode.Proxy
+            else     -> PcMode.WebBackend
+        }
     )
     val tokenInput = MutableStateFlow(prefs.getString("tokenInput", "") ?: "")
 
@@ -123,9 +128,18 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("gatewayPort", v).apply()
     }
 
+    fun setProxyPort(v: Int) {
+        proxyPort.value = v
+        prefs.edit().putInt("proxyPort", v).apply()
+    }
+
     fun setMode(m: PcMode) {
         mode.value = m
-        prefs.edit().putString("mode", if (m == PcMode.Direct) "direct" else "web").apply()
+        prefs.edit().putString("mode", when (m) {
+            PcMode.Direct     -> "direct"
+            PcMode.Proxy      -> "proxy"
+            PcMode.WebBackend -> "web"
+        }).apply()
     }
 
     fun setTokenInput(v: String) {
@@ -143,6 +157,14 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val wsUrl: String
                 val effectiveToken: String
+
+                if (currentMode == PcMode.Proxy) {
+                    cachedWsUrl = "ws://${host.value}:${proxyPort.value}/pico/ws"
+                    cachedToken = ""
+                    _state.value = PcState.Connecting
+                    openProxyWebSocket()
+                    return@launch
+                }
 
                 if (currentMode == PcMode.WebBackend) {
                     _state.value = PcState.FetchingToken
@@ -182,6 +204,14 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun openWebSocket(wsUrl: String, token: String) {
         webSocket = session.connectWs(wsUrl = wsUrl, token = token) { event ->
+            handleEvent(event)
+        }
+    }
+
+    // Proxy shortcut: clawproxy acts as a transparent PicoClaw gateway —
+    // same /pico/ws endpoint, proxy port, no token needed.
+    private fun openProxyWebSocket() {
+        webSocket = session.connectViaProxy(host.value, proxyPort.value) { event ->
             handleEvent(event)
         }
     }
@@ -323,6 +353,11 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
             if (!isActive) return@launch
             try {
                 val currentMode = mode.value
+                if (currentMode == PcMode.Proxy) {
+                    _state.value = PcState.Connecting
+                    openProxyWebSocket()
+                    return@launch
+                }
                 val wsUrl: String
                 val effectiveToken: String
                 if (currentMode == PcMode.WebBackend) {

@@ -58,6 +58,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -142,6 +144,8 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
     val pairCode by viewModel.pairCode.collectAsState()
     val tokenInput by viewModel.tokenInput.collectAsState()
     val sessionPicker by viewModel.sessionPicker.collectAsState()
+    val useProxy by viewModel.useProxy.collectAsState()
+    val proxyPort by viewModel.proxyPort.collectAsState()
 
     var activeTab by rememberSaveable { mutableStateOf(ZcTab.Connect) }
 
@@ -174,6 +178,10 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                         tokenInput = tokenInput,
                         pairCode = pairCode,
                         errorText = errorText,
+                        useProxy = useProxy,
+                        proxyPort = proxyPort,
+                        onUseProxyChange = { viewModel.setUseProxy(it) },
+                        onProxyPortChange = { viewModel.setProxyPort(it) },
                         viewModel = viewModel,
                     )
 
@@ -244,13 +252,16 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
 // Top status bar – mirrors OpenClaw's gateway status chip
 // ---------------------------------------------------------------------------
 @Composable
-private fun ZcStatusBar(state: ZcState, host: String, port: Int) {
+private fun ZcStatusBar(state: ZcState, host: String, port: Int, useProxy: Boolean = false, proxyPort: Int = 18780) {
     val dotColor: Color
     val textColor: Color
     val bgColor: Color
     val borderColor: Color
     val label: String
-    val connectedLabel = stringResource(R.string.zc_status_connected, host, port)
+    val connectedLabel = if (useProxy)
+        stringResource(R.string.zc_status_connected, host, proxyPort) + " ⁀proxy"
+    else
+        stringResource(R.string.zc_status_connected, host, port)
     val connectingLabel = stringResource(R.string.zc_status_connecting)
     val pairingRequiredLabel = stringResource(R.string.zc_status_pairing_required)
     val reconnectingLabel = stringResource(R.string.zc_status_reconnecting)
@@ -366,6 +377,10 @@ private fun ZcConnectTab(
     tokenInput: String,
     pairCode: String,
     errorText: String?,
+    useProxy: Boolean,
+    proxyPort: Int,
+    onUseProxyChange: (Boolean) -> Unit,
+    onProxyPortChange: (Int) -> Unit,
     viewModel: ZeroClawViewModel,
 ) {
     val reconnectAttempt by viewModel.reconnectAttempt.collectAsState()
@@ -516,6 +531,10 @@ private fun ZcConnectTab(
                     onPortChange = { v -> v.toIntOrNull()?.let { viewModel.setPort(it) } },
                     onTokenInputChange = { viewModel.tokenInput.value = it },
                     onConnect = { viewModel.connect() },
+                    useProxy = useProxy,
+                    proxyPort = proxyPort,
+                    onUseProxyChange = onUseProxyChange,
+                    onProxyPortChange = onProxyPortChange,
                 )
             }
         }
@@ -774,8 +793,53 @@ private fun ZcSetupForm(
     onPortChange: (String) -> Unit,
     onTokenInputChange: (String) -> Unit,
     onConnect: () -> Unit,
+    useProxy: Boolean = false,
+    proxyPort: Int = 18780,
+    onUseProxyChange: (Boolean) -> Unit = {},
+    onProxyPortChange: (Int) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // ── Via Proxy toggle card ──────────────────────────────────────────────
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = if (useProxy) mobileAccentSoft else mobileCardSurface,
+            border = BorderStroke(
+                1.dp,
+                if (useProxy) LocalMobileColors.current.chipBorderConnecting else mobileBorder,
+            ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.zc_via_proxy),
+                        style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
+                        color = if (useProxy) mobileAccent else mobileText,
+                    )
+                    Text(
+                        stringResource(R.string.zc_via_proxy_subtitle),
+                        style = mobileCaption1,
+                        color = if (useProxy) mobileAccent.copy(alpha = 0.7f) else mobileTextTertiary,
+                    )
+                }
+                Switch(
+                    checked = useProxy,
+                    onCheckedChange = onUseProxyChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = mobileAccent,
+                    ),
+                )
+            }
+        }
+
+        // ── Connection fields (content changes based on proxy toggle) ─────────────
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
@@ -787,34 +851,55 @@ private fun ZcSetupForm(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    stringResource(R.string.zc_gateway),
+                    if (useProxy) stringResource(R.string.zc_via_proxy) else stringResource(R.string.zc_gateway),
                     style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
                     color = mobileTextSecondary,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ZcTextField(
-                        value = host,
-                        onValueChange = onHostChange,
-                        label = stringResource(R.string.common_host),
-                        modifier = Modifier.weight(3f),
-                        keyboardType = KeyboardType.Uri,
-                    )
-                    ZcTextField(
-                        value = port.toString(),
-                        onValueChange = onPortChange,
-                        label = stringResource(R.string.common_port),
-                        modifier = Modifier.weight(1.5f),
-                        keyboardType = KeyboardType.Number,
-                    )
-                }
-                if (token.isNullOrBlank()) {
-                    ZcTextField(
-                        value = tokenInput,
-                        onValueChange = onTokenInputChange,
-                        label = stringResource(R.string.zc_bearer_token_optional),
-                        keyboardType = KeyboardType.Text,
-                        imeAction = ImeAction.Done,
-                    )
+                if (useProxy) {
+                    // Proxy mode: host + proxy port
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ZcTextField(
+                            value = host,
+                            onValueChange = onHostChange,
+                            label = stringResource(R.string.common_host),
+                            modifier = Modifier.weight(3f),
+                            keyboardType = KeyboardType.Uri,
+                        )
+                        ZcTextField(
+                            value = proxyPort.toString(),
+                            onValueChange = { v -> v.toIntOrNull()?.let { onProxyPortChange(it) } },
+                            label = stringResource(R.string.zc_proxy_port),
+                            modifier = Modifier.weight(1.5f),
+                            keyboardType = KeyboardType.Number,
+                        )
+                    }
+                } else {
+                    // Direct mode: host + gateway port + optional token
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ZcTextField(
+                            value = host,
+                            onValueChange = onHostChange,
+                            label = stringResource(R.string.common_host),
+                            modifier = Modifier.weight(3f),
+                            keyboardType = KeyboardType.Uri,
+                        )
+                        ZcTextField(
+                            value = port.toString(),
+                            onValueChange = onPortChange,
+                            label = stringResource(R.string.common_port),
+                            modifier = Modifier.weight(1.5f),
+                            keyboardType = KeyboardType.Number,
+                        )
+                    }
+                    if (token.isNullOrBlank()) {
+                        ZcTextField(
+                            value = tokenInput,
+                            onValueChange = onTokenInputChange,
+                            label = stringResource(R.string.zc_bearer_token_optional),
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Done,
+                        )
+                    }
                 }
             }
         }
@@ -833,7 +918,7 @@ private fun ZcSetupForm(
             Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                stringResource(R.string.zc_connect_gateway),
+                if (useProxy) stringResource(R.string.zc_connect_via_proxy) else stringResource(R.string.zc_connect_gateway),
                 style = mobileHeadline.copy(fontWeight = FontWeight.Bold),
             )
         }

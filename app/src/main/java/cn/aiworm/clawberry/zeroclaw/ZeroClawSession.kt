@@ -241,6 +241,22 @@ class ZeroClawSession(private val client: OkHttpClient) {
   }
 
   // ---------------------------------------------------------------------------
+  // Step 3b — Connect via clawproxy (transparent mode)
+  //
+  // Treats clawproxy exactly like a ZeroClaw gateway:
+  //   • Same endpoint:  /ws/chat
+  //   • Same protocol:  zeroclaw.v1
+  //   • Different port: caller passes proxyPort (default 18780)
+  //   • No token:       clawproxy handles auth on its side
+  // ---------------------------------------------------------------------------
+  fun connectViaProxy(
+    host: String,
+    port: Int,
+    sessionId: String,
+    onEvent: (ZcEvent) -> Unit,
+  ): WebSocket = connectChat(host, port, token = null, sessionId, onEvent)
+
+  // ---------------------------------------------------------------------------
   // GET /api/sessions  — list all stored sessions
   // ---------------------------------------------------------------------------
   suspend fun fetchSessions(host: String, port: Int, token: String?): List<ZcSessionInfo> =

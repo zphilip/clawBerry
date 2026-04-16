@@ -142,6 +142,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
     val host by viewModel.host.collectAsState()
     val webPort by viewModel.webPort.collectAsState()
     val gatewayPort by viewModel.gatewayPort.collectAsState()
+    val proxyPort by viewModel.proxyPort.collectAsState()
     val mode by viewModel.mode.collectAsState()
     val token by viewModel.token.collectAsState()
     val tokenInput by viewModel.tokenInput.collectAsState()
@@ -161,7 +162,11 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
         PcStatusBar(
             state = state,
             host = host,
-            port = if (mode == PcMode.WebBackend) webPort else gatewayPort,
+            port = when (mode) {
+                PcMode.WebBackend -> webPort
+                PcMode.Direct     -> gatewayPort
+                PcMode.Proxy      -> proxyPort
+            },
             mode = mode,
         )
 
@@ -173,12 +178,14 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     host = host,
                     webPort = webPort,
                     gatewayPort = gatewayPort,
+                    proxyPort = proxyPort,
                     mode = mode,
                     token = token,
                     tokenInput = tokenInput,
                     onHostChange = viewModel::setHost,
                     onWebPortChange = viewModel::setWebPort,
                     onGatewayPortChange = viewModel::setGatewayPort,
+                    onProxyPortChange = viewModel::setProxyPort,
                     onModeChange = viewModel::setMode,
                     onTokenInputChange = viewModel::setTokenInput,
                     onConnect = viewModel::connect,
@@ -206,12 +213,14 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     host = host,
                     webPort = webPort,
                     gatewayPort = gatewayPort,
+                    proxyPort = proxyPort,
                     mode = mode,
                     token = token,
                     tokenInput = tokenInput,
                     onHostChange = viewModel::setHost,
                     onWebPortChange = viewModel::setWebPort,
                     onGatewayPortChange = viewModel::setGatewayPort,
+                    onProxyPortChange = viewModel::setProxyPort,
                     onModeChange = viewModel::setMode,
                     onTokenInputChange = viewModel::setTokenInput,
                     onClearAndReset = viewModel::clearAndReset,
@@ -255,7 +264,11 @@ private fun PcStatusBar(
     val textColor: Color
     val bgColor: Color
     val borderColor: Color
-    val modeTag = if (mode == PcMode.WebBackend) stringResource(R.string.pc_mode_web) else stringResource(R.string.pc_mode_direct)
+    val modeTag = when (mode) {
+        PcMode.WebBackend -> stringResource(R.string.pc_mode_web)
+        PcMode.Direct     -> stringResource(R.string.pc_mode_direct)
+        PcMode.Proxy      -> stringResource(R.string.pc_mode_proxy)
+    }
     val pcIdleLabel = stringResource(R.string.pc_status_idle, modeTag)
     val pcFetchingToken = stringResource(R.string.pc_status_fetching_token)
     val pcConnecting = stringResource(R.string.pc_status_connecting)
@@ -370,12 +383,14 @@ private fun PcConnectTab(
     host: String,
     webPort: Int,
     gatewayPort: Int,
+    proxyPort: Int,
     mode: PcMode,
     token: String?,
     tokenInput: String,
     onHostChange: (String) -> Unit,
     onWebPortChange: (Int) -> Unit,
     onGatewayPortChange: (Int) -> Unit,
+    onProxyPortChange: (Int) -> Unit,
     onModeChange: (PcMode) -> Unit,
     onTokenInputChange: (String) -> Unit,
     onConnect: () -> Unit,
@@ -528,6 +543,7 @@ private fun PcConnectTab(
             host = host,
             webPort = webPort,
             gatewayPort = gatewayPort,
+            proxyPort = proxyPort,
             mode = mode,
             token = token,
         )
@@ -666,10 +682,12 @@ private fun PcConnectTab(
                 host = host,
                 webPort = webPort,
                 gatewayPort = gatewayPort,
+                proxyPort = proxyPort,
                 tokenInput = tokenInput,
                 onHostChange = onHostChange,
                 onWebPortChange = onWebPortChange,
                 onGatewayPortChange = onGatewayPortChange,
+                onProxyPortChange = onProxyPortChange,
                 onTokenInputChange = onTokenInputChange,
                 onConnect = onConnect,
             )
@@ -735,6 +753,7 @@ private fun PcInfoCard(
     host: String,
     webPort: Int,
     gatewayPort: Int,
+    proxyPort: Int,
     mode: PcMode,
     token: String?,
 ) {
@@ -754,7 +773,11 @@ private fun PcInfoCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(text = stringResource(R.string.common_endpoint), color = mobileTextSecondary, style = mobileCallout)
-                val portLabel = if (mode == PcMode.WebBackend) ":$webPort (web)" else ":$gatewayPort (direct)"
+                val portLabel = when (mode) {
+                    PcMode.WebBackend -> ":$webPort (web)"
+                    PcMode.Direct     -> ":$gatewayPort (direct)"
+                    PcMode.Proxy      -> ":$proxyPort (proxy)"
+                }
                 Text(
                     text = "$host$portLabel",
                     color = mobileText,
@@ -770,8 +793,16 @@ private fun PcInfoCard(
             ) {
                 Text(text = stringResource(R.string.pc_mode_label), color = mobileTextSecondary, style = mobileCallout)
                 Text(
-                    text = if (mode == PcMode.WebBackend) stringResource(R.string.pc_mode_web_backend) else stringResource(R.string.pc_mode_direct_label),
-                    color = if (mode == PcMode.WebBackend) mobileAccent else Color(0xFF9C27B0),
+                    text = when (mode) {
+                        PcMode.WebBackend -> stringResource(R.string.pc_mode_web_backend)
+                        PcMode.Direct     -> stringResource(R.string.pc_mode_direct_label)
+                        PcMode.Proxy      -> stringResource(R.string.pc_mode_proxy_label)
+                    },
+                    color = when (mode) {
+                        PcMode.WebBackend -> mobileAccent
+                        PcMode.Direct     -> Color(0xFF9C27B0)
+                        PcMode.Proxy      -> Color(0xFF00897B)
+                    },
                     style = mobileCallout.copy(fontWeight = FontWeight.Medium),
                 )
             }
@@ -847,7 +878,7 @@ private fun PcInfoCard(
 private fun PcModeSelector(mode: PcMode, onModeChange: (PcMode) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(text = stringResource(R.string.pc_connection_mode), color = mobileTextSecondary, style = mobileCaption1)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PcModeChip(
                 label = stringResource(R.string.pc_mode_web_backend),
                 description = stringResource(R.string.pc_mode_web_port),
@@ -860,6 +891,13 @@ private fun PcModeSelector(mode: PcMode, onModeChange: (PcMode) -> Unit) {
                 description = stringResource(R.string.pc_mode_direct_port),
                 selected = mode == PcMode.Direct,
                 onClick = { onModeChange(PcMode.Direct) },
+                modifier = Modifier.weight(1f),
+            )
+            PcModeChip(
+                label = stringResource(R.string.pc_mode_proxy_label),
+                description = stringResource(R.string.pc_mode_proxy_port),
+                selected = mode == PcMode.Proxy,
+                onClick = { onModeChange(PcMode.Proxy) },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -912,10 +950,12 @@ private fun PcSetupForm(
     host: String,
     webPort: Int,
     gatewayPort: Int,
+    proxyPort: Int,
     tokenInput: String,
     onHostChange: (String) -> Unit,
     onWebPortChange: (Int) -> Unit,
     onGatewayPortChange: (Int) -> Unit,
+    onProxyPortChange: (Int) -> Unit,
     onTokenInputChange: (String) -> Unit,
     onConnect: () -> Unit,
 ) {
@@ -944,7 +984,7 @@ private fun PcSetupForm(
                 style = mobileCaption1,
                 modifier = Modifier.padding(horizontal = 2.dp),
             )
-        } else {
+        } else if (mode == PcMode.Direct) {
             PcTextField(
                 value = gatewayPort.toString(),
                 onValueChange = { v ->
@@ -962,6 +1002,25 @@ private fun PcSetupForm(
                 keyboardType = KeyboardType.Password,
                 imeAction = ImeAction.Go,
                 onImeAction = onConnect,
+            )
+        } else {
+            // Proxy mode — only proxy port (no token)
+            PcTextField(
+                value = proxyPort.toString(),
+                onValueChange = { v ->
+                    onProxyPortChange(v.filter(Char::isDigit).take(5).toIntOrNull() ?: proxyPort)
+                },
+                label = stringResource(R.string.zc_proxy_port),
+                placeholder = "18780",
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Go,
+                onImeAction = onConnect,
+            )
+            Text(
+                text = stringResource(R.string.zc_via_proxy_subtitle),
+                color = mobileTextTertiary,
+                style = mobileCaption1,
+                modifier = Modifier.padding(horizontal = 2.dp),
             )
         }
 
@@ -1440,12 +1499,14 @@ private fun PcSettingsTab(
     host: String,
     webPort: Int,
     gatewayPort: Int,
+    proxyPort: Int,
     mode: PcMode,
     token: String?,
     tokenInput: String,
     onHostChange: (String) -> Unit,
     onWebPortChange: (Int) -> Unit,
     onGatewayPortChange: (Int) -> Unit,
+    onProxyPortChange: (Int) -> Unit,
     onModeChange: (PcMode) -> Unit,
     onTokenInputChange: (String) -> Unit,
     onClearAndReset: () -> Unit,
@@ -1492,6 +1553,15 @@ private fun PcSettingsTab(
                 },
                 label = stringResource(R.string.pc_settings_direct_gateway_port),
                 placeholder = "18790",
+                keyboardType = KeyboardType.Number,
+            )
+            PcTextField(
+                value = proxyPort.toString(),
+                onValueChange = { v ->
+                    onProxyPortChange(v.filter(Char::isDigit).take(5).toIntOrNull() ?: proxyPort)
+                },
+                label = stringResource(R.string.zc_proxy_port),
+                placeholder = "18780",
                 keyboardType = KeyboardType.Number,
             )
         }

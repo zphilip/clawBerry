@@ -131,8 +131,10 @@
     <string name="zc_pair_and_connect">配对并连接</string>
     <string name="zc_connect_gateway">连接网关</string>
     <string name="zc_gateway">网关</string>
-    <string name="zc_bearer_token_optional">Bearer 令牌（可选 – 跳过配对）</string>
-
+    <string name="zc_bearer_token_optional">Bearer 令牌（可选 – 跳过配对）</string>    <string name="zc_via_proxy">經由 ClawProxy</string>
+    <string name="zc_via_proxy_subtitle">無需令牌或配對 · 端口 18780</string>
+    <string name="zc_proxy_port">代理端口</string>
+    <string name="zc_connect_via_proxy">經由代理連接</string>
     <!-- ZeroClaw Info card -->
     <string name="zc_state_connected">已连接</string>
     <string name="zc_token">令牌</string>
@@ -188,8 +190,9 @@
     <string name="pc_mode_web_backend">网页后端</string>
     <string name="pc_mode_direct_label">直连</string>
     <string name="pc_mode_web_port">端口 18800</string>
-    <string name="pc_mode_direct_port">端口 18790</string>
-    <string name="pc_connection_mode">连接模式</string>
+    <string name="pc_mode_direct_port">端口 18790</string>    <string name="pc_mode_proxy_label">經由代理</string>
+    <string name="pc_mode_proxy_port">端口 18780 · 無需令牌</string>
+    <string name="pc_mode_proxy">代理</string>    <string name="pc_connection_mode">连接模式</string>
 
     <!-- PicoClaw Setup form -->
     <string name="pc_gateway_host">网关主机</string>

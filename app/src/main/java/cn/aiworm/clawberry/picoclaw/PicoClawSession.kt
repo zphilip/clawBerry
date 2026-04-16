@@ -119,6 +119,8 @@ class PicoClawSession(private val client: OkHttpClient) {
     // Sends BOTH auth methods for maximum compatibility:
     //   • Authorization: Bearer <token>         — survives reverse proxies
     //   • Sec-WebSocket-Protocol: token.<value> — browser-native fallback
+    //
+    // When token is blank (proxy/transparent mode) auth headers are omitted.
     // -------------------------------------------------------------------------
     fun connectWs(
         wsUrl: String,
@@ -131,8 +133,14 @@ class PicoClawSession(private val client: OkHttpClient) {
 
         val req = Request.Builder()
             .url(fullUrl)
-            .header("Authorization", "Bearer $token")
-            .header("Sec-WebSocket-Protocol", "token.$token")
+            .apply {
+                // Only send auth headers when we have a real token.
+                // Blank = proxy/transparent mode — server handles auth itself.
+                if (token.isNotBlank()) {
+                    header("Authorization", "Bearer $token")
+                    header("Sec-WebSocket-Protocol", "token.$token")
+                }
+            }
             .build()
 
         return client.newWebSocket(
@@ -191,4 +199,19 @@ class PicoClawSession(private val client: OkHttpClient) {
             },
         )
     }
+
+    // -------------------------------------------------------------------------
+    // Connect via clawproxy (transparent mode)
+    //
+    // Treats clawproxy exactly like a PicoClaw gateway:
+    //   • Same endpoint:  /pico/ws
+    //   • Different port: caller passes proxyPort (default 18780)
+    //   • No token:       clawproxy handles auth on its side
+    // -------------------------------------------------------------------------
+    fun connectViaProxy(
+        host: String,
+        port: Int,
+        onEvent: (PcEvent) -> Unit,
+    ): WebSocket = connectWs(wsUrl = "ws://$host:$port/pico/ws", token = "", onEvent)
 }
+

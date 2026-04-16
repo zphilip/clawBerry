@@ -132,6 +132,10 @@
     <string name="zc_connect_gateway">Connect Gateway</string>
     <string name="zc_gateway">Gateway</string>
     <string name="zc_bearer_token_optional">Bearer token (optional – skips pairing)</string>
+    <string name="zc_via_proxy">Via ClawProxy</string>
+    <string name="zc_via_proxy_subtitle">No token or pairing needed · port 18780</string>
+    <string name="zc_proxy_port">Proxy Port</string>
+    <string name="zc_connect_via_proxy">Connect via Proxy</string>
 
     <!-- ZeroClaw Info card -->
     <string name="zc_state_connected">Connected</string>
@@ -189,6 +193,9 @@
     <string name="pc_mode_direct_label">Direct</string>
     <string name="pc_mode_web_port">Port 18800</string>
     <string name="pc_mode_direct_port">Port 18790</string>
+    <string name="pc_mode_proxy_label">Via Proxy</string>
+    <string name="pc_mode_proxy_port">Port 18780 · no token</string>
+    <string name="pc_mode_proxy">proxy</string>
     <string name="pc_connection_mode">Connection Mode</string>
 
     <!-- PicoClaw Setup form -->

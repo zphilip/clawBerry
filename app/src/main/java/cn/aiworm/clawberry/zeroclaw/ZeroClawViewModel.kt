@@ -81,6 +81,10 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   val pairCode = MutableStateFlow("")
   val tokenInput = MutableStateFlow("")
 
+  // --- Proxy settings ---
+  val useProxy = MutableStateFlow(prefs.getBoolean("use_proxy", false))
+  val proxyPort = MutableStateFlow(prefs.getInt("proxy_port", 18780))
+
   private val _token = MutableStateFlow<String?>(prefs.getString("token", null))
   val token: StateFlow<String?> = _token.asStateFlow()
 
@@ -124,10 +128,29 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     prefs.edit().putInt("port", value).apply()
   }
 
+  fun setUseProxy(value: Boolean) {
+    useProxy.value = value
+    prefs.edit().putBoolean("use_proxy", value).apply()
+  }
+
+  fun setProxyPort(value: Int) {
+    proxyPort.value = value
+    prefs.edit().putInt("proxy_port", value).apply()
+  }
+
   // ---------------------------------------------------------------------------
   // Step 1: health check → decide if pairing needed
   // ---------------------------------------------------------------------------
   fun connect() {
+    if (useProxy.value) {
+      // Proxy is transparent: skip health-check and pairing, connect directly
+      viewModelScope.launch(Dispatchers.IO) {
+        _state.value = ZcState.Connecting
+        _errorText.value = null
+        openWebSocket()
+      }
+      return
+    }
     val currentToken = _token.value.orEmpty().ifBlank { tokenInput.value.trim().ifEmpty { null } }
     viewModelScope.launch(Dispatchers.IO) {
       _state.value = ZcState.HealthChecking
@@ -217,8 +240,16 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   // ---------------------------------------------------------------------------
   private fun openWebSocket() {
     _state.value = ZcState.Connecting
-    webSocket = session.connectChat(host.value, port.value, _token.value, sessionId) { event ->
-      handleEvent(event)
+    webSocket = if (useProxy.value) {
+      // Proxy mode: clawproxy acts as a transparent ZeroClaw gateway —
+      // same /ws/chat endpoint, proxy port, no token needed.
+      session.connectViaProxy(host.value, proxyPort.value, sessionId) { event ->
+        handleEvent(event)
+      }
+    } else {
+      session.connectChat(host.value, port.value, _token.value, sessionId) { event ->
+        handleEvent(event)
+      }
     }
   }
 
