@@ -49,15 +49,45 @@ All three chat tabs include press-to-talk voice input powered by the on-device S
 A2UI canvas surface displayed in the **Screen** tab — supports interactive canvas commands from the gateway.
 
 ### 🔗 ClawProxy Support
-All gateway tabs support transparent **ClawProxy** mode:
+All gateway tabs support transparent **[ClawProxy](https://github.com/zphilip/ClawBoard/tree/main/clawproxy)** mode (part of the [ClawBoard](https://github.com/zphilip/ClawBoard) project):
 - Proxy port default: **18780**
-- No token or pairing code required — the proxy handles authentication on its side
+- No token or pairing code required — ClawProxy handles authentication on its side
 - Wire format is identical to a direct gateway connection
+- ClawProxy v4 includes a SQLite-backed offline message queue for resilient delivery
 
 ### 🔒 Security
 - Biometric lock support
 - Encrypted token persistence
 - Token stripped from WebSocket headers when connecting via proxy
+
+---
+
+## Project Ecosystem
+
+| Project | Role | Language |
+|---|---|---|
+| [ClawBerry](https://github.com/zphilip/ClawBerry) *(this repo)* | Android companion app | Kotlin / Jetpack Compose |
+| [ClawBoard](https://github.com/zphilip/ClawBoard) | Web dashboard for ZeroClaw `config.toml` + **ClawProxy** transport | Python / Go |
+| [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) | AI agent runtime (ZeroClaw gateway) | TypeScript |
+| [OpenClaw](https://github.com/openclaw/openclaw) | Original gateway framework (upstream) | TypeScript |
+
+### ClawBoard
+
+[ClawBoard](https://github.com/zphilip/ClawBoard) is a mobile-friendly [NiceGUI](https://nicegui.io/) web dashboard for editing ZeroClaw's `config.toml` at runtime. It also ships **ClawProxy** — a Go-based transparent WebSocket proxy that sits in front of ZeroClaw/PicoClaw gateways:
+
+- 10-tab config UI covering providers, channels, memory, security, agent, scheduler and more
+- Supports all 18 channel types (Telegram, Discord, Slack, Signal, WhatsApp, DingTalk, Lark, Email, etc.)
+- **ClawProxy** (`clawproxy/`) — transparent reverse proxy at port **18780**, SQLite-backed offline queue (v4), no client-side auth needed
+- Save & Restart button writes `config.toml` and restarts `zeroclaw.service` via `systemctl`
+- Fully mobile-friendly (Quasar/Material UI)
+
+```bash
+# Run ClawBoard dashboard
+pip install nicegui toml
+cd ClawBoard
+python3 dashboard.py
+# Open http://<host>:8080
+```
 
 ---
 
