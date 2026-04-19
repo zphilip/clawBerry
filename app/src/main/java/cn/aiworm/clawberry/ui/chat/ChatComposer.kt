@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Refresh
@@ -93,6 +94,7 @@ fun ChatComposer(
   var voiceState by remember { mutableStateOf(AsrVoiceState.Idle) }
   var capturedPcm by remember { mutableStateOf<ByteArray?>(null) }
   var asrMode by rememberSaveable { mutableStateOf("2pass") }
+  var transcribeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
   val voiceRecorder = remember { VoiceRecorder() }
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
@@ -228,7 +230,7 @@ fun ChatComposer(
               if (pcmToRetry != null) {
                 // Re-send the same clip to ASR without re-recording
                 voiceState = AsrVoiceState.Transcribing
-                scope.launch(Dispatchers.IO) {
+                transcribeJob = scope.launch(Dispatchers.IO) {
                   val text = AsrClient.transcribe(asrUrl, pcmToRetry, asrMode)
                   withContext(Dispatchers.Main) {
                     if (!text.isNullOrBlank()) {
@@ -255,7 +257,7 @@ fun ChatComposer(
             }
             AsrVoiceState.Recording -> {
               voiceState = AsrVoiceState.Transcribing
-              scope.launch(Dispatchers.IO) {
+              transcribeJob = scope.launch(Dispatchers.IO) {
                 val pcm = voiceRecorder.stop()
                 if (VoiceRecorder.isSilent(pcm)) {
                   withContext(Dispatchers.Main) {
@@ -292,6 +294,28 @@ fun ChatComposer(
           }
         },
       )
+
+      // ── ASR cancel button (visible while recording or transcribing) ──────
+      if (voiceState == AsrVoiceState.Recording || voiceState == AsrVoiceState.Transcribing) {
+        SecondaryActionButton(
+          label = stringResource(R.string.asr_cancel),
+          icon = Icons.Default.Close,
+          enabled = true,
+          containerColor = mobileCardSurface,
+          iconTint = mobileTextSecondary,
+          compact = true,
+          onClick = {
+            if (voiceState == AsrVoiceState.Recording) {
+              voiceRecorder.release()  // stops mic and discards PCM — nothing sent to ASR
+            } else {
+              transcribeJob?.cancel()  // abort in-flight HTTP request
+            }
+            transcribeJob = null
+            capturedPcm = null
+            voiceState = AsrVoiceState.Idle
+          },
+        )
+      }
 
       // ── ASR mode selector (tap to cycle: 2pass → offline → online) ──────
       Surface(

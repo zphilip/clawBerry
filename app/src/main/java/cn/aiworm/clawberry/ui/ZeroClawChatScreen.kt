@@ -104,6 +104,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -1050,6 +1051,7 @@ private fun ZcComposer(
     var voiceState by remember { mutableStateOf(clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle) }
     var capturedPcm by remember { mutableStateOf<ByteArray?>(null) }
     var asrMode by rememberSaveable { mutableStateOf("2pass") }
+    var transcribeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val voiceRecorder = remember { VoiceRecorder() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1162,7 +1164,7 @@ private fun ZcComposer(
                             val pcmToRetry = capturedPcm
                             if (pcmToRetry != null) {
                                 voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing
-                                scope.launch(Dispatchers.IO) {
+                                transcribeJob = scope.launch(Dispatchers.IO) {
                                     val text = AsrClient.transcribe(asrUrl, pcmToRetry, asrMode)
                                     withContext(Dispatchers.Main) {
                                         if (!text.isNullOrBlank()) {
@@ -1189,7 +1191,7 @@ private fun ZcComposer(
                         }
                         clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording -> {
                             voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing
-                            scope.launch(Dispatchers.IO) {
+                            transcribeJob = scope.launch(Dispatchers.IO) {
                                 val pcm = voiceRecorder.stop()
                                 if (VoiceRecorder.isSilent(pcm)) {
                                     withContext(Dispatchers.Main) {
@@ -1226,6 +1228,25 @@ private fun ZcComposer(
                     }
                 },
             )
+
+            // ── ASR cancel button (visible while recording or transcribing) ──
+            if (voiceState == clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording ||
+                voiceState == clawberry.aiworm.cn.ui.chat.AsrVoiceState.Transcribing) {
+                ZcActionButton(
+                    icon = Icons.Default.Close,
+                    label = stringResource(R.string.asr_cancel),
+                    onClick = {
+                        if (voiceState == clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording) {
+                            voiceRecorder.release()  // stops mic, discards PCM — nothing sent to ASR
+                        } else {
+                            transcribeJob?.cancel()  // abort in-flight HTTP request
+                        }
+                        transcribeJob = null
+                        capturedPcm = null
+                        voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle
+                    },
+                )
+            }
 
             // ── ASR mode selector (tap to cycle: 2pass → offline → online) ──
             Surface(

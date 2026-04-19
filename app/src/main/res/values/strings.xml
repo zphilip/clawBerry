@@ -303,6 +303,7 @@
     <string name="asr_recording">Recording…</string>
     <string name="asr_transcribing">Transcribing…</string>
     <string name="asr_failed">Voice input failed</string>
+    <string name="asr_cancel">Cancel voice</string>
     <string name="asr_success">Text filled — tap Send to submit</string>
     <string name="asr_failed_message">Speech recognition failed, tap mic to retry</string>
     <string name="asr_no_voice">No voice detected</string>

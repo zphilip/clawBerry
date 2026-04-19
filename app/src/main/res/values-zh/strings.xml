@@ -298,6 +298,7 @@
     <string name="asr_recording">录音中…</string>
     <string name="asr_transcribing">转录中…</string>
     <string name="asr_failed">語音輸入失敗</string>
+    <string name="asr_cancel">取消語音</string>
     <string name="asr_success">文字已填入輸入框，點擊發送即可</string>
     <string name="asr_failed_message">語音識別失敗，請點擊麥克風重試</string>
     <string name="asr_no_voice">未偵測到聲音</string>
