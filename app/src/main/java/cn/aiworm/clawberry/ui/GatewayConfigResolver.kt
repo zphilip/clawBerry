@@ -135,6 +135,48 @@ internal fun resolveScannedSetupCode(rawInput: String): String? {
   return setupCode.takeIf { decodeGatewaySetupCode(it) != null }
 }
 
+internal data class GatewayScannedManualResult(
+  val host: String? = null,
+  val port: Int? = null,
+  val tls: Boolean? = null,
+  val token: String? = null,
+)
+
+/**
+ * Parses a QR scan result for Manual mode.
+ * Accepts:
+ *   - A URL (http/https/ws/wss) with an optional `?token=` query parameter → fills host, port, tls, token.
+ *   - A bare token string (no `://`) → fills token only.
+ * Returns null only if the input is blank.
+ */
+internal fun resolveScannedManualConfig(rawInput: String): GatewayScannedManualResult? {
+  val trimmed = rawInput.trim()
+  if (trimmed.isEmpty()) return null
+
+  // Looks like a URL
+  if (trimmed.contains("://")) {
+    val uri = runCatching { java.net.URI(trimmed) }.getOrNull()
+    val host = uri?.host?.trim()?.trim('[', ']').orEmpty()
+    if (host.isNotEmpty()) {
+      val scheme = uri?.scheme?.trim()?.lowercase(Locale.US).orEmpty()
+      val tls = when (scheme) {
+        "ws", "http" -> false
+        else -> true
+      }
+      val port = uri?.port?.takeIf { it in 1..65535 } ?: if (tls) 443 else 18789
+      val token = uri?.query?.split("&")
+        ?.firstOrNull { it.startsWith("token=") }
+        ?.removePrefix("token=")
+        ?.trim()
+        ?.ifEmpty { null }
+      return GatewayScannedManualResult(host = host, port = port, tls = tls, token = token)
+    }
+  }
+
+  // Not a URL — treat the whole content as a raw token
+  return GatewayScannedManualResult(token = trimmed)
+}
+
 internal fun composeGatewayManualUrl(hostInput: String, portInput: String, tls: Boolean): String? {
   val host = hostInput.trim()
   val port = portInput.trim().toIntOrNull() ?: return null

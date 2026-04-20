@@ -241,14 +241,28 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
   LaunchedEffect(pendingQrResult) {
     val contents = pendingQrResult ?: return@LaunchedEffect
     pendingQrResult = null
-    val scannedSetupCode = resolveScannedSetupCode(contents)
-    if (scannedSetupCode == null) {
-      gatewayError = context.getString(R.string.onboarding_error_invalid_qr)
+    if (gatewayInputMode == GatewayInputMode.Manual) {
+      val result = resolveScannedManualConfig(contents)
+      if (result == null) {
+        gatewayError = context.getString(R.string.onboarding_error_invalid_qr_manual)
+      } else {
+        result.host?.let { manualHost = it }
+        result.port?.let { manualPort = it.toString() }
+        result.tls?.let { manualTls = it }
+        result.token?.let { viewModel.setGatewayToken(it) }
+        gatewayError = null
+        attemptedConnect = false
+      }
     } else {
-      setupCode = scannedSetupCode
-      gatewayInputMode = GatewayInputMode.SetupCode
-      gatewayError = null
-      attemptedConnect = false
+      val scannedSetupCode = resolveScannedSetupCode(contents)
+      if (scannedSetupCode == null) {
+        gatewayError = context.getString(R.string.onboarding_error_invalid_qr)
+      } else {
+        setupCode = scannedSetupCode
+        gatewayInputMode = GatewayInputMode.SetupCode
+        gatewayError = null
+        attemptedConnect = false
+      }
     }
   }
 
@@ -571,7 +585,12 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                 qrScanner.launch(
                   ScanOptions().apply {
                     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    setPrompt("Scan gateway setup QR code")
+                    setPrompt(
+                      if (gatewayInputMode == GatewayInputMode.Manual)
+                        "Scan gateway URL or token QR code"
+                      else
+                        "Scan gateway setup QR code"
+                    )
                     setBeepEnabled(true)
                     setBarcodeImageEnabled(false)
                     setCaptureActivity(clawberry.aiworm.cn.PortraitCaptureActivity::class.java)
@@ -1091,6 +1110,14 @@ private fun GatewayStep(
             ResolvedEndpoint(endpoint = resolvedEndpoint)
           }
         } else {
+          Button(
+            onClick = onScanQrClick,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = onboardingPrimaryButtonColors(),
+          ) {
+            Text(stringResource(R.string.onboarding_gateway_scan_qr_manual), style = onboardingHeadlineStyle.copy(fontWeight = FontWeight.Bold))
+          }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuickFillChip(label = stringResource(R.string.openclaw_android_emulator), onClick = {
               onManualHostChange("10.0.2.2")

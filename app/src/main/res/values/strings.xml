@@ -338,6 +338,8 @@
     <string name="onboarding_gateway_tls_sub">Switch to secure websocket (`wss`).</string>
     <string name="onboarding_gateway_method_qr">QR / Setup Code</string>
     <string name="onboarding_error_invalid_qr">QR code did not contain a valid setup code.</string>
+    <string name="onboarding_error_invalid_qr_manual">QR code did not contain a valid URL or token.</string>
+    <string name="onboarding_gateway_scan_qr_manual">Scan QR (URL or Token)</string>
     <string name="onboarding_error_scan_first">Scan QR code first, or use Advanced setup.</string>
     <string name="onboarding_error_setup_code_url">Setup code has invalid gateway URL.</string>
     <string name="onboarding_error_manual_invalid">Manual endpoint is invalid.</string>

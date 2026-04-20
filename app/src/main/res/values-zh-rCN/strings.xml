@@ -337,6 +337,8 @@
     <string name="onboarding_gateway_tls_sub">切换为安全 WebSocket（`wss`）。</string>
     <string name="onboarding_gateway_method_qr">二维码/设置码</string>
     <string name="onboarding_error_invalid_qr">二维码未包含有效的设置码。</string>
+    <string name="onboarding_error_invalid_qr_manual">二维码未包含有效的网址或令牌。</string>
+    <string name="onboarding_gateway_scan_qr_manual">扫描二维码（网址或令牌）</string>
     <string name="onboarding_error_scan_first">请先扫描二维码，或使用高级设置。</string>
     <string name="onboarding_error_setup_code_url">设置码中的网关 URL 无效。</string>
     <string name="onboarding_error_manual_invalid">手动端点无效。</string>
