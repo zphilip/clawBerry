@@ -190,6 +190,18 @@ class SecurePrefs(
     saveGatewayBootstrapToken(value)
   }
 
+  fun clearGatewaySetupAuth() {
+    val instanceId = _instanceId.value
+    securePrefs.edit {
+      remove("gateway.manual.token")
+      remove("gateway.token.$instanceId")
+      remove("gateway.bootstrapToken.$instanceId")
+      remove("gateway.password.$instanceId")
+    }
+    _gatewayToken.value = ""
+    _gatewayBootstrapToken.value = ""
+  }
+
   fun setOnboardingCompleted(value: Boolean) {
     plainPrefs.edit { putBoolean("onboarding.completed", value) }
     _onboardingCompleted.value = value

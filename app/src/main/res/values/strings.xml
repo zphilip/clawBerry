@@ -377,6 +377,6 @@
     <string name="onboarding_review_failed_msg">Copy this report and give it to your Claw.</string>
     <string name="onboarding_review_error_label">Error</string>
     <string name="onboarding_review_copy_report">Copy Report for Claw</string>
-    <string name="onboarding_review_tap_connect_again">Then tap Connect again.</string>
+    <string name="onboarding_review_tap_connect_again">OpenClaw retries automatically while this screen stays open.</string>
     <string name="onboarding_review_android_version">OpenClaw Android %1$s</string>
 </resources>

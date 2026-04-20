@@ -184,6 +184,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     prefs.setGatewayBootstrapToken(value)
   }
 
+  fun resetGatewaySetupAuth() {
+    ensureRuntime().resetGatewaySetupAuth()
+  }
+
   fun setGatewayPassword(value: String) {
     prefs.setGatewayPassword(value)
   }

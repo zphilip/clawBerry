@@ -326,6 +326,8 @@ class NodeRuntime(
       session = operatorSession,
       supportsChatSubscribe = false,
       isConnected = { operatorConnected },
+      onBeforeSpeak = { micCapture.pauseForTts() },
+      onAfterSpeak = { micCapture.resumeAfterTts() },
     ).also { speaker ->
       speaker.setPlaybackEnabled(prefs.speakerEnabled.value)
     }
@@ -354,11 +356,7 @@ class NodeRuntime(
         parseChatSendRunId(response) ?: idempotencyKey
       },
       speakAssistantReply = { text ->
-        // Skip if TalkModeManager is handling TTS (ttsOnAllResponses) to avoid
-        // double-speaking the same assistant reply from both pipelines.
-        if (!talkMode.ttsOnAllResponses) {
-          voiceReplySpeaker.speakAssistantReply(text)
-        }
+        voiceReplySpeaker.speakAssistantReply(text)
       },
     )
   }
@@ -397,6 +395,8 @@ class NodeRuntime(
       session = operatorSession,
       supportsChatSubscribe = true,
       isConnected = { operatorConnected },
+      onBeforeSpeak = { micCapture.pauseForTts() },
+      onAfterSpeak = { micCapture.resumeAfterTts() },
     )
   }
 
@@ -526,6 +526,12 @@ class NodeRuntime(
   fun setGatewayToken(value: String) = prefs.setGatewayToken(value)
   fun setGatewayBootstrapToken(value: String) = prefs.setGatewayBootstrapToken(value)
   fun setGatewayPassword(value: String) = prefs.setGatewayPassword(value)
+  fun resetGatewaySetupAuth() {
+    prefs.clearGatewaySetupAuth()
+    val deviceId = identityStore.loadOrCreate().deviceId
+    deviceAuthStore.clearToken(deviceId, "node")
+    deviceAuthStore.clearToken(deviceId, "operator")
+  }
   fun setOnboardingCompleted(value: Boolean) = prefs.setOnboardingCompleted(value)
   val lastDiscoveredStableId: StateFlow<String> = prefs.lastDiscoveredStableId
   val canvasDebugStatusEnabled: StateFlow<Boolean> = prefs.canvasDebugStatusEnabled
@@ -554,12 +560,11 @@ class NodeRuntime(
 
     scope.launch {
       prefs.talkEnabled.collect { enabled ->
-        // MicCaptureManager handles STT + send to gateway.
-        // TalkModeManager plays TTS on assistant responses.
+        // MicCaptureManager handles STT + send to gateway, while the dedicated
+        // reply speaker handles TTS for assistant replies in the voice tab.
         micCapture.setMicEnabled(enabled)
         if (enabled) {
-          // Mic on = user is on voice screen and wants TTS responses.
-          talkMode.ttsOnAllResponses = true
+          talkMode.ttsOnAllResponses = false
           scope.launch { talkMode.ensureChatSubscribed() }
         }
         externalAudioCaptureActive.value = enabled
@@ -693,7 +698,8 @@ class NodeRuntime(
     if (value) {
       // Tapping mic on interrupts any active TTS (barge-in)
       talkMode.stopTts()
-      talkMode.ttsOnAllResponses = true
+      if (voiceReplySpeakerLazy.isInitialized()) voiceReplySpeaker.stopTts()
+      talkMode.ttsOnAllResponses = false
       scope.launch { talkMode.ensureChatSubscribed() }
     }
     micCapture.setMicEnabled(value)

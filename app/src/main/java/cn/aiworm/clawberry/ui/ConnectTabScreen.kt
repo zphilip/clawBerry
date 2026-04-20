@@ -141,7 +141,12 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
     }
 
   val showDiagnostics = !isConnected && gatewayStatusHasDiagnostics(statusText)
+  val pairingRequired = !isConnected && gatewayStatusLooksLikePairing(statusText)
   val statusLabel = gatewayStatusForDisplay(statusText)
+
+  PairingAutoRetryEffect(enabled = pairingRequired) {
+    viewModel.refreshGatewayConnection()
+  }
 
   Column(
     modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp),
@@ -261,6 +266,9 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           }
 
           validationText = null
+          if (inputMode == ConnectInputMode.SetupCode) {
+            viewModel.resetGatewaySetupAuth()
+          }
           viewModel.setManualEnabled(true)
           viewModel.setManualHost(config.host)
           viewModel.setManualPort(config.port)
@@ -297,8 +305,21 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
           modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
           verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-          Text(stringResource(R.string.openclaw_last_gateway_error), style = mobileHeadline, color = mobileWarning)
+          Text(
+            if (pairingRequired) stringResource(R.string.onboarding_review_pairing_required) else stringResource(R.string.openclaw_last_gateway_error),
+            style = mobileHeadline,
+            color = mobileWarning,
+          )
           Text(statusLabel, style = mobileBody.copy(fontFamily = FontFamily.Monospace), color = mobileText)
+          if (pairingRequired) {
+            CommandBlock("openclaw devices list")
+            CommandBlock("openclaw devices approve <requestId>")
+            Text(
+              stringResource(R.string.onboarding_review_tap_connect_again),
+              style = mobileCallout,
+              color = mobileTextSecondary,
+            )
+          }
           Text(stringResource(R.string.openclaw_android_version, openClawAndroidVersionLabel()), style = mobileCaption1, color = mobileTextSecondary)
           Button(
             onClick = {

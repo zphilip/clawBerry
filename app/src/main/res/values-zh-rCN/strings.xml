@@ -376,6 +376,6 @@
     <string name="onboarding_review_failed_msg">复制此报告并发送给您的 Claw。</string>
     <string name="onboarding_review_error_label">错误</string>
     <string name="onboarding_review_copy_report">复制 Claw 报告</string>
-    <string name="onboarding_review_tap_connect_again">然后再次点击连接。</string>
+    <string name="onboarding_review_tap_connect_again">此界面保持打开时，OpenClaw 会自动重试连接。</string>
     <string name="onboarding_review_android_version">OpenClaw Android %1$s</string>
 </resources>

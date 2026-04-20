@@ -33,6 +33,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -54,6 +55,8 @@ class TalkModeManager(
   private val session: GatewaySession,
   private val supportsChatSubscribe: Boolean,
   private val isConnected: () -> Boolean,
+  private val onBeforeSpeak: suspend () -> Unit = {},
+  private val onAfterSpeak: suspend () -> Unit = {},
 ) {
   companion object {
     private const val tag = "TalkMode"
@@ -867,6 +870,7 @@ class TalkModeManager(
     val voiceId = resolvedPlaybackVoice?.voiceId
 
     _statusText.value = "Speaking…"
+    onBeforeSpeak()
     _isSpeaking.value = true
     lastSpokenText = cleaned
     ensureInterruptListener()
@@ -928,7 +932,7 @@ class TalkModeManager(
         Log.w(tag, "system voice failed: ${fallbackErr.message ?: fallbackErr::class.simpleName}")
       }
     } finally {
-
+      withContext(NonCancellable) { onAfterSpeak() }
       _isSpeaking.value = false
     }
   }

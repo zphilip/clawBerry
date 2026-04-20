@@ -213,6 +213,8 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
   val context = androidx.compose.ui.platform.LocalContext.current
   val statusText by viewModel.statusText.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
+  val isNodeConnected by viewModel.isNodeConnected.collectAsState()
+  val canFinishOnboarding = isConnected && isNodeConnected
   val serverName by viewModel.serverName.collectAsState()
   val remoteAddress by viewModel.remoteAddress.collectAsState()
   val persistedGatewayToken by viewModel.gatewayToken.collectAsState()
@@ -723,12 +725,13 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             FinalStep(
               parsedGateway = parseGatewayEndpoint(gatewayUrl),
               statusText = statusText,
-              isConnected = isConnected,
+              isConnected = canFinishOnboarding,
               serverName = serverName,
               remoteAddress = remoteAddress,
               attemptedConnect = attemptedConnect,
               enabledPermissions = enabledPermissionSummary,
               methodLabel = if (gatewayInputMode == GatewayInputMode.SetupCode) stringResource(R.string.onboarding_gateway_method_qr) else stringResource(R.string.openclaw_manual),
+              onRetry = { viewModel.refreshGatewayConnection() },
             )
         }
       }
@@ -839,7 +842,7 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             }
           }
           OnboardingStep.FinalCheck -> {
-            if (isConnected) {
+            if (canFinishOnboarding) {
               Button(
                 onClick = { viewModel.setOnboardingCompleted(true) },
                 modifier = Modifier.weight(1f).height(52.dp),
@@ -859,6 +862,12 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                   }
                   val token = persistedGatewayToken.trim()
                   val password = gatewayPassword.trim()
+                  val bootstrapToken =
+                    if (gatewayInputMode == GatewayInputMode.SetupCode) {
+                      decodeGatewaySetupCode(setupCode)?.bootstrapToken?.trim()?.ifEmpty { null }
+                    } else {
+                      null
+                    }
                   attemptedConnect = true
                   viewModel.setManualEnabled(true)
                   viewModel.setManualHost(parsed.host)
@@ -866,6 +875,9 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                   viewModel.setManualTls(parsed.tls)
                   if (gatewayInputMode == GatewayInputMode.Manual) {
                     viewModel.setGatewayBootstrapToken("")
+                  } else {
+                    viewModel.resetGatewaySetupAuth()
+                    viewModel.setGatewayBootstrapToken(bootstrapToken.orEmpty())
                   }
                   if (token.isNotEmpty()) {
                     viewModel.setGatewayToken(token)
@@ -1521,12 +1533,17 @@ private fun FinalStep(
   attemptedConnect: Boolean,
   enabledPermissions: String,
   methodLabel: String,
+  onRetry: () -> Unit = {},
 ) {
   val context = androidx.compose.ui.platform.LocalContext.current
   val gatewayAddress = parsedGateway?.displayUrl ?: stringResource(R.string.onboarding_error_gateway_url)
   val statusLabel = gatewayStatusForDisplay(statusText)
   val showDiagnostics = gatewayStatusHasDiagnostics(statusText)
   val pairingRequired = gatewayStatusLooksLikePairing(statusText)
+
+  PairingAutoRetryEffect(enabled = pairingRequired && attemptedConnect) {
+    onRetry()
+  }
 
   Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
     Text(stringResource(R.string.onboarding_review_title), style = onboardingTitle1Style, color = onboardingText)
