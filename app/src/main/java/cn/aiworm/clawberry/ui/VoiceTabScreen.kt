@@ -46,6 +46,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -88,10 +91,18 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
   val speakerEnabled by viewModel.speakerEnabled.collectAsState()
   val micStatusText by viewModel.micStatusText.collectAsState()
   val micLiveTranscript by viewModel.micLiveTranscript.collectAsState()
-  val micQueuedMessages by viewModel.micQueuedMessages.collectAsState()
   val micConversation by viewModel.micConversation.collectAsState()
   val micInputLevel by viewModel.micInputLevel.collectAsState()
   val micIsSending by viewModel.micIsSending.collectAsState()
+  val useCustomAsr by viewModel.useCustomAsr.collectAsState()
+  val asrUrl by viewModel.asrUrl.collectAsState()
+
+  // Animate the ring level here at the top composable scope for stable recomposition.
+  val animatedRingLevel by animateFloatAsState(
+    targetValue = if (micEnabled) micInputLevel.coerceIn(0f, 1f) else 0f,
+    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+    label = "micRingLevel",
+  )
 
   val hasStreamingAssistant = micConversation.any { it.role == VoiceConversationRole.Assistant && it.isStreaming }
   val showThinkingBubble = micIsSending && !hasStreamingAssistant
@@ -245,14 +256,14 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
           modifier = Modifier.padding(horizontal = 16.dp).size(90.dp),
           contentAlignment = Alignment.Center,
         ) {
-          if (micEnabled) {
-            val ringLevel = micInputLevel.coerceIn(0f, 1f)
-            val ringSize = 68.dp + (22.dp * max(ringLevel, 0.05f))
+          if (micEnabled || animatedRingLevel > 0.01f) {
+            val effectiveLevel = max(animatedRingLevel, if (micEnabled) 0.05f else 0f)
+            val ringSize = 68.dp + (22.dp * effectiveLevel)
             Box(
               modifier =
                 Modifier
                   .size(ringSize)
-                  .background(mobileAccent.copy(alpha = 0.12f + 0.14f * ringLevel), CircleShape),
+                  .background(mobileAccent.copy(alpha = 0.12f + 0.14f * effectiveLevel), CircleShape),
             )
           }
           Button(
@@ -289,24 +300,58 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
           }
         }
 
-        // Invisible spacer to balance the row (matches speaker column width)
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          Box(modifier = Modifier.size(48.dp))
-          Spacer(modifier = Modifier.height(4.dp))
-          Text("", style = mobileCaption2)
+        // ASR backend toggle — compact vertical stack beside the mic button
+        val funAsrAvailable = asrUrl.isNotBlank()
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Surface(
+            shape = RoundedCornerShape(999.dp),
+            color = mobileSurface,
+            border = BorderStroke(1.dp, mobileBorder),
+          ) {
+            Column(
+              modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
+              horizontalAlignment = Alignment.CenterHorizontally,
+              verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+              // Built-in chip
+              Surface(
+                onClick = { viewModel.setUseCustomAsr(false) },
+                shape = RoundedCornerShape(999.dp),
+                color = if (!useCustomAsr) mobileAccent else Color.Transparent,
+              ) {
+                Text(
+                  "Built-in",
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                  style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+                  color = if (!useCustomAsr) Color.White else mobileTextSecondary,
+                )
+              }
+              // FunASR chip
+              Surface(
+                onClick = { viewModel.setUseCustomAsr(true) },
+                shape = RoundedCornerShape(999.dp),
+                color = if (useCustomAsr) mobileAccent else Color.Transparent,
+              ) {
+                Text(
+                  if (funAsrAvailable) "FunASR" else "FunASR !",
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                  style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+                  color = when {
+                    useCustomAsr -> Color.White
+                    funAsrAvailable -> mobileTextSecondary
+                    else -> mobileWarning
+                  },
+                )
+              }
+            }
+          }
         }
       }
 
       // Status + labels
-      val queueCount = micQueuedMessages.size
-      val stateText =
-        when {
-          queueCount > 0 -> stringResource(R.string.openclaw_voice_state_queued, queueCount)
-          micIsSending -> stringResource(R.string.openclaw_voice_state_sending)
-          micCooldown -> stringResource(R.string.openclaw_voice_state_cooldown)
-          micEnabled -> stringResource(R.string.openclaw_voice_state_listening)
-          else -> stringResource(R.string.openclaw_voice_state_mic_off)
-        }
       val stateColor =
         when {
           micEnabled -> mobileSuccess
@@ -319,7 +364,7 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
         border = BorderStroke(1.dp, if (micEnabled) mobileSuccess.copy(alpha = 0.3f) else mobileBorder),
       ) {
         Text(
-          "$gatewayStatus · $stateText",
+          "$gatewayStatus · $micStatusText",
           style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
           color = stateColor,
           modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),

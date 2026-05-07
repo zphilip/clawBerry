@@ -1,6 +1,7 @@
 ﻿package clawberry.aiworm.cn
 
 import android.os.Bundle
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
@@ -68,10 +69,16 @@ class MainActivity : AppCompatActivity() {
   override fun onStart() {
     super.onStart()
     viewModel.setForeground(true)
+    // Hide the floating bubble when the app itself is in the foreground.
+    FloatingOverlayService.stop(this)
   }
 
   override fun onStop() {
     viewModel.setForeground(false)
+    // Show the floating bubble when the user switches to another app.
+    if (viewModel.floatingOverlayEnabled.value && Settings.canDrawOverlays(this)) {
+      FloatingOverlayService.start(this)
+    }
     super.onStop()
   }
 }

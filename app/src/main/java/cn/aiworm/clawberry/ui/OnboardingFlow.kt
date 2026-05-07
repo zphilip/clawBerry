@@ -1568,9 +1568,9 @@ private fun FinalStep(
   val showDiagnostics = gatewayStatusHasDiagnostics(statusText)
   val pairingRequired = gatewayStatusLooksLikePairing(statusText)
 
-  PairingAutoRetryEffect(enabled = pairingRequired && attemptedConnect) {
-    onRetry()
-  }
+  // NOTE: No auto-retry during pairing. Each refreshGatewayConnection() opens a new WebSocket
+  // which causes the server to generate a new pairing request ID, making it impossible for the
+  // host admin to approve the right request. The user must tap Connect again manually after approving.
 
   Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
     Text(stringResource(R.string.onboarding_review_title), style = onboardingTitle1Style, color = onboardingText)

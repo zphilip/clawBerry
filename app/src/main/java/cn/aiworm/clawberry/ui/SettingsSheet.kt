@@ -91,6 +91,7 @@ fun SettingsSheet(viewModel: MainViewModel) {
   val locationPreciseEnabled by viewModel.locationPreciseEnabled.collectAsState()
   val preventSleep by viewModel.preventSleep.collectAsState()
   val canvasDebugStatusEnabled by viewModel.canvasDebugStatusEnabled.collectAsState()
+  val floatingOverlayEnabled by viewModel.floatingOverlayEnabled.collectAsState()
   val appLanguage by viewModel.appLanguage.collectAsState()
   val asrUrl by viewModel.asrUrl.collectAsState()
   var asrUrlDraft by rememberSaveable(asrUrl) { mutableStateOf(asrUrl) }
@@ -187,6 +188,10 @@ fun SettingsSheet(viewModel: MainViewModel) {
       mutableStateOf(isNotificationListenerEnabled(context))
     }
 
+  var overlayPermissionGranted by
+    remember {
+      mutableStateOf(android.provider.Settings.canDrawOverlays(context))
+    }
   var photosPermissionGranted by
     remember {
       mutableStateOf(
@@ -330,6 +335,7 @@ fun SettingsSheet(viewModel: MainViewModel) {
               PackageManager.PERMISSION_GRANTED &&
               ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) ==
               PackageManager.PERMISSION_GRANTED
+          overlayPermissionGranted = android.provider.Settings.canDrawOverlays(context)
         }
       }
     lifecycleOwner.lifecycle.addObserver(observer)
@@ -925,6 +931,39 @@ fun SettingsSheet(viewModel: MainViewModel) {
                 checked = canvasDebugStatusEnabled,
                 onCheckedChange = viewModel::setCanvasDebugStatusEnabled,
               )
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text(stringResource(R.string.settings_pref_floating_overlay), style = mobileHeadline) },
+            supportingContent = { Text(stringResource(R.string.settings_pref_floating_overlay_subtitle), style = mobileCallout) },
+            trailingContent = {
+              if (!overlayPermissionGranted) {
+                Button(
+                  onClick = {
+                    context.startActivity(
+                      Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.fromParts("package", context.packageName, null),
+                      ),
+                    )
+                  },
+                  colors = settingsPrimaryButtonColors(),
+                  shape = RoundedCornerShape(14.dp),
+                ) {
+                  Text(stringResource(R.string.settings_pref_floating_overlay_grant), style = mobileCallout.copy(fontWeight = FontWeight.Bold))
+                }
+              } else {
+                Switch(
+                  checked = floatingOverlayEnabled,
+                  onCheckedChange = { checked ->
+                    viewModel.setFloatingOverlayEnabled(checked)
+                    if (!checked) clawberry.aiworm.cn.FloatingOverlayService.stop(context)
+                  },
+                )
+              }
             },
           )
         }

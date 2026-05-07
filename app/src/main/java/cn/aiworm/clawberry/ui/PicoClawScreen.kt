@@ -159,6 +159,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        val asrModeState = rememberSaveable { mutableStateOf("2pass") }
         PcStatusBar(
             state = state,
             host = host,
@@ -168,6 +169,8 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                 PcMode.Proxy      -> proxyPort
             },
             mode = mode,
+            asrMode = asrModeState.value,
+            onAsrModeChange = { asrModeState.value = it },
         )
 
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -198,6 +201,8 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     asrUrl = LocalContext.current
                         .getSharedPreferences("openclaw.node", android.content.Context.MODE_PRIVATE)
                         .getString("asr.url", "wss://asr.aiworm.cn:443") ?: "wss://asr.aiworm.cn:443",
+                    asrMode = asrModeState.value,
+                    onAsrModeChange = { asrModeState.value = it },
                     onSend = { text, atts ->
                         viewModel.sendMessage(
                             text,
@@ -258,6 +263,8 @@ private fun PcStatusBar(
     host: String,
     port: Int,
     mode: PcMode,
+    asrMode: String = "2pass",
+    onAsrModeChange: (String) -> Unit = {},
 ) {
     val label: String
     val dotColor: Color
@@ -328,45 +335,80 @@ private fun PcStatusBar(
         border = BorderStroke(1.dp, LocalMobileColors.current.chipBorderConnecting),
         shadowElevation = 6.dp,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // First row: logo + title on left, connection status chip on right
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_picoclaw),
-                    contentDescription = "PicoClaw",
-                    modifier = Modifier.size(28.dp),
-                )
-                Text("PicoClaw", style = mobileTitle2, color = mobileText)
-            }
-            Surface(
-                shape = RoundedCornerShape(999.dp),
-                color = bgColor,
-                border = BorderStroke(1.dp, borderColor),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Surface(
-                        modifier = Modifier.padding(top = 1.dp),
-                        color = dotColor,
-                        shape = RoundedCornerShape(999.dp),
-                    ) {
-                        Box(modifier = Modifier.padding(4.dp))
-                    }
-                    Text(
-                        text = label,
-                        style = mobileCaption1,
-                        color = textColor,
-                        maxLines = 1,
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_picoclaw),
+                        contentDescription = "PicoClaw",
+                        modifier = Modifier.size(28.dp),
                     )
+                    Text("PicoClaw", style = mobileTitle2, color = mobileText)
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = bgColor,
+                    border = BorderStroke(1.dp, borderColor),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.padding(top = 1.dp),
+                            color = dotColor,
+                            shape = RoundedCornerShape(999.dp),
+                        ) {
+                            Box(modifier = Modifier.padding(4.dp))
+                        }
+                        Text(
+                            text = label,
+                            style = mobileCaption1,
+                            color = textColor,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+            // Second row: ASR mode selector (only shown when connected)
+            if (state == PcState.Connected) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = "ASR:",
+                        style = mobileCaption1,
+                        color = mobileTextTertiary,
+                    )
+                    listOf("2pass", "offline", "online").forEach { m ->
+                        Surface(
+                            onClick = { onAsrModeChange(m) },
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (asrMode == m) mobileAccent else mobileSurface,
+                            border = BorderStroke(1.dp, if (asrMode == m) mobileAccent else mobileBorder),
+                        ) {
+                            Text(
+                                text = m,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+                                color = if (asrMode == m) Color.White else mobileTextSecondary,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1045,6 +1087,8 @@ private fun PcChatTab(
     isConnected: Boolean,
     messages: List<PcChatMessage>,
     asrUrl: String,
+    asrMode: String,
+    onAsrModeChange: (String) -> Unit,
     onSend: (String, List<PendingImageAttachment>) -> Unit,
     onClearChat: () -> Unit,
     onRefresh: () -> Unit,
@@ -1110,6 +1154,8 @@ private fun PcChatTab(
         PcComposer(
             attachments = attachments,
             asrUrl = asrUrl,
+            asrMode = asrMode,
+            onAsrModeChange = onAsrModeChange,
             onPickImages = { pickImages.launch("image/*") },
             onRemoveAttachment = { id -> attachments.removeAll { it.id == id } },
             onClearChat = onClearChat,
@@ -1234,6 +1280,8 @@ private fun PcTypingIndicator() {
 private fun PcComposer(
     attachments: List<PendingImageAttachment>,
     asrUrl: String,
+    asrMode: String,
+    onAsrModeChange: (String) -> Unit,
     onPickImages: () -> Unit,
     onRemoveAttachment: (id: String) -> Unit,
     onClearChat: () -> Unit,
@@ -1245,7 +1293,6 @@ private fun PcComposer(
     var voiceState by remember { mutableStateOf(clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle) }
     var transcribeJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var capturedPcm by remember { mutableStateOf<ByteArray?>(null) }
-    var asrMode by rememberSaveable { mutableStateOf("2pass") }
     val voiceRecorder = remember { VoiceRecorder() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -1432,28 +1479,6 @@ private fun PcComposer(
                         voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle
                     },
                 )
-            }
-
-            // ── ASR mode selector (tap to cycle: 2pass → offline → online) ──
-            Surface(
-                onClick = {
-                    asrMode = when (asrMode) { "2pass" -> "offline"; "offline" -> "online"; else -> "2pass" }
-                },
-                modifier = Modifier.height(44.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = mobileCardSurface,
-                border = BorderStroke(1.dp, mobileBorder),
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.padding(horizontal = 10.dp),
-                ) {
-                    Text(
-                        text = asrMode,
-                        style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
-                        color = mobileTextSecondary,
-                    )
-                }
             }
 
             Spacer(Modifier.weight(1f))

@@ -2,15 +2,10 @@
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +36,11 @@ data class VoiceConversationEntry(
 class MicCaptureManager(
   private val context: Context,
   private val scope: CoroutineScope,
+  /**
+   * Returns the FunASR WebSocket URL to use for recognition.
+   * When blank/empty the built-in Android [SpeechRecognizer] is used instead.
+   */
+  private val asrUrl: () -> String = { "" },
   /**
    * Send [message] to the gateway and return the run ID.
    * [onRunIdKnown] is called with the idempotency key *before* the network
@@ -92,11 +92,10 @@ class MicCaptureManager(
   private val messageQueue = ArrayDeque<String>()
   private val messageQueueLock = Any()
   private var flushedPartialTranscript: String? = null
-  private var pendingRunId: String? = null
   private var pendingAssistantEntryId: String? = null
   private var gatewayConnected = false
 
-  private var recognizer: SpeechRecognizer? = null
+  private var backend: AsrBackend? = null
   private var restartJob: Job? = null
   private var drainJob: Job? = null
   private var transcriptFlushJob: Job? = null
@@ -105,6 +104,16 @@ class MicCaptureManager(
   private val ttsPauseLock = Any()
   private var ttsPauseDepth = 0
   private var resumeMicAfterTts = false
+  @Volatile private var pendingRunId: String? = null
+  @Volatile private var pendingAltRunId: String? = null
+
+  /**
+   * Events that arrive while we hold only the idempotency key (pendingRunId = earlyKey) but the
+   * server has already started streaming with its own runId.  Drained once pendingRunId is updated
+   * to the real server runId by [sendQueuedIfIdle].
+   */
+  private val earlyEventBuffer = ArrayDeque<String>()   // payloadJson strings
+  private val earlyEventLock   = Any()
 
   private fun enqueueMessage(message: String) {
     synchronized(messageQueueLock) { messageQueue.addLast(message) }
@@ -158,13 +167,13 @@ class MicCaptureManager(
     }
   }
 
-  /** Destroy the SpeechRecognizer before TTS playback to prevent audio session conflicts. */
+  /** Destroy the ASR backend before TTS playback to prevent audio session conflicts. */
   suspend fun pauseForTts() {
     val shouldPause = synchronized(ttsPauseLock) {
       ttsPauseDepth += 1
       if (ttsPauseDepth > 1) return@synchronized false
       resumeMicAfterTts = _micEnabled.value
-      val active = resumeMicAfterTts || recognizer != null || _isListening.value
+      val active = resumeMicAfterTts || backend != null || _isListening.value
       if (!active) return@synchronized false
       stopRequested = true
       restartJob?.cancel()
@@ -181,13 +190,12 @@ class MicCaptureManager(
     }
     if (!shouldPause) return
     withContext(Dispatchers.Main) {
-      recognizer?.cancel()
-      recognizer?.destroy()
-      recognizer = null
+      backend?.destroy()
+      backend = null
     }
   }
 
-  /** Recreate the SpeechRecognizer after TTS playback if it was active before. */
+  /** Recreate the ASR backend after TTS playback if it was active before. */
   suspend fun resumeAfterTts() {
     val shouldResume = synchronized(ttsPauseLock) {
       if (ttsPauseDepth == 0) return@synchronized false
@@ -215,6 +223,7 @@ class MicCaptureManager(
     pendingRunTimeoutJob?.cancel()
     pendingRunTimeoutJob = null
     pendingRunId = null
+    pendingAltRunId = null
     pendingAssistantEntryId = null
     _isSending.value = false
     if (hasQueuedMessages()) {
@@ -234,8 +243,47 @@ class MicCaptureManager(
 
     val runId = pendingRunId ?: run { Log.d("MicCapture", "no pendingRunId — drop"); return }
     val eventRunId = payload["runId"].asStringOrNull() ?: return
-    if (eventRunId != runId) { Log.d("MicCapture", "runId mismatch: event=$eventRunId pending=$runId"); return }
+    if (eventRunId != runId && eventRunId != pendingAltRunId) {
+      // The server may be streaming events with its real runId while we still hold only the
+      // idempotency key (the window between onRunIdKnown and chat.send returning).  Buffer
+      // these events so they can be replayed once pendingRunId is updated to serverRunId.
+      if (_isSending.value) {
+        synchronized(earlyEventLock) { earlyEventBuffer.addLast(payloadJson) }
+        Log.d("MicCapture", "runId mismatch — buffered (event=$eventRunId, pending=$runId)")
+      } else {
+        Log.d("MicCapture", "runId mismatch: event=$eventRunId pending=$runId alt=$pendingAltRunId")
+      }
+      return
+    }
 
+    processGatewayPayload(payload)
+  }
+
+  /**
+   * Replay any events buffered during the idempotency-key window for [serverRunId].  Must be
+   * called on the same thread/coroutine that updates [pendingRunId] to [serverRunId].
+   */
+  private fun drainEarlyEventBuffer(serverRunId: String, altRunId: String?) {
+    val toProcess = synchronized(earlyEventLock) {
+      val matching = earlyEventBuffer
+        .mapNotNull { pJson ->
+          try { json.parseToJsonElement(pJson).asObjectOrNull()?.let { pJson to it } } catch (_: Throwable) { null }
+        }
+        .filter { (_, p) ->
+          val id = p["runId"].asStringOrNull()
+          id == serverRunId || (altRunId != null && id == altRunId)
+        }
+        .map { it.second }   // keep JsonObject, discard raw string
+      earlyEventBuffer.clear()  // discard non-matching entries
+      matching
+    }
+    if (toProcess.isNotEmpty()) {
+      Log.d("MicCapture", "draining ${toProcess.size} buffered event(s) for runId=$serverRunId")
+      toProcess.forEach { processGatewayPayload(it) }
+    }
+  }
+
+  private fun processGatewayPayload(payload: kotlinx.serialization.json.JsonObject) {
     when (payload["state"].asStringOrNull()) {
       "delta" -> {
         val deltaText = parseAssistantText(payload)
@@ -245,11 +293,26 @@ class MicCaptureManager(
       }
       "final" -> {
         val finalText = parseAssistantText(payload)?.trim().orEmpty()
+        val textToSpeak: String
         if (finalText.isNotEmpty()) {
+          // Final event carries the complete text — use it directly.
           upsertPendingAssistant(text = finalText, isStreaming = false)
-          playAssistantReplyAsync(finalText)
-        } else if (pendingAssistantEntryId != null) {
-          updateConversationEntry(pendingAssistantEntryId!!, text = null, isStreaming = false)
+          textToSpeak = finalText
+        } else {
+          // Final event is a completion signal with no body — the server streamed
+          // the full reply via delta events. Finalize the streaming entry and
+          // use its accumulated text for TTS.
+          val entryId = pendingAssistantEntryId
+          val accumulated = entryId
+            ?.let { id -> _conversation.value.find { it.id == id }?.text.orEmpty() }
+            .orEmpty()
+          if (entryId != null) {
+            updateConversationEntry(entryId, text = null, isStreaming = false)
+          }
+          textToSpeak = accumulated
+        }
+        if (textToSpeak.isNotBlank()) {
+          playAssistantReplyAsync(textToSpeak)
         }
         completePendingTurn()
       }
@@ -267,7 +330,9 @@ class MicCaptureManager(
 
   private fun start() {
     stopRequested = false
-    if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+    val url = asrUrl().trim()
+    val useBuiltIn = url.isEmpty()
+    if (useBuiltIn && !BuiltInAsrBackend.isAvailable(context)) {
       _statusText.value = "Speech recognizer unavailable"
       _micEnabled.value = false
       return
@@ -280,8 +345,12 @@ class MicCaptureManager(
 
     mainHandler.post {
       try {
-        if (recognizer == null) {
-          recognizer = SpeechRecognizer.createSpeechRecognizer(context).also { it.setRecognitionListener(listener) }
+        if (backend == null) {
+          backend = if (useBuiltIn) {
+            BuiltInAsrBackend(speechMinSessionMs, speechCompleteSilenceMs, speechPossibleSilenceMs)
+          } else {
+            FunAsrBackend(url, scope)
+          }
         }
         startListeningSession()
       } catch (err: Throwable) {
@@ -301,35 +370,31 @@ class MicCaptureManager(
     _statusText.value = if (_isSending.value) "Mic off · sending…" else "Mic off"
     _inputLevel.value = 0f
     mainHandler.post {
-      recognizer?.cancel()
-      recognizer?.destroy()
-      recognizer = null
+      backend?.destroy()
+      backend = null
     }
   }
 
   private fun startListeningSession() {
-    val recognizerInstance = recognizer ?: return
-    val intent =
-      Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-        putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, speechMinSessionMs)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, speechCompleteSilenceMs)
-        putExtra(
-          RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
-          speechPossibleSilenceMs,
-        )
-      }
+    val b = backend ?: return
     _statusText.value =
       when {
-        _isSending.value -> "Listening · sending queued voice"
-        messageQueue.isNotEmpty() -> "Listening · ${messageQueue.size} queued"
-        else -> "Listening"
+        _isSending.value -> "${listeningLabel()} · sending queued voice"
+        messageQueue.isNotEmpty() -> "${listeningLabel()} · ${messageQueue.size} queued"
+        else -> listeningLabel()
       }
     _isListening.value = true
-    recognizerInstance.startListening(intent)
+    b.startListening(context, asrCallbacks)
+  }
+
+  /** Returns a "Listening · <Backend>" label reflecting the active ASR backend. */
+  private fun listeningLabel(): String {
+    val suffix = when (backend) {
+      is FunAsrBackend -> "FunASR"
+      is BuiltInAsrBackend -> "Built-in ASR"
+      else -> null
+    }
+    return if (suffix != null) "Listening · $suffix" else "Listening"
   }
 
   private fun scheduleRestart(delayMs: Long = 300L) {
@@ -384,7 +449,7 @@ class MicCaptureManager(
     if (_isSending.value) return
     if (!hasQueuedMessages()) {
       if (_micEnabled.value) {
-        _statusText.value = "Listening"
+        _statusText.value = listeningLabel()
       } else {
         _statusText.value = "Mic off"
       }
@@ -407,9 +472,18 @@ class MicCaptureManager(
           // Called with the idempotency key before chat.send fires so that
           // pendingRunId is populated before any chat events can arrive.
           pendingRunId = earlyRunId
+          pendingAltRunId = earlyRunId
         }
         // Update to the real runId if the gateway returned a different one.
-        if (runId != null && runId != pendingRunId) pendingRunId = runId
+        // Also drain any events that arrived before the response while we only held the
+        // idempotency key (the runId mismatch window).
+        if (runId != null && runId != pendingRunId) {
+          pendingRunId = runId
+          drainEarlyEventBuffer(runId, pendingAltRunId)
+        } else if (runId != null) {
+          // idempotency key IS the server runId — still drain in case something was buffered
+          drainEarlyEventBuffer(runId, null)
+        }
         if (runId == null) {
           pendingRunTimeoutJob?.cancel()
           pendingRunTimeoutJob = null
@@ -426,6 +500,7 @@ class MicCaptureManager(
         pendingRunTimeoutJob = null
         _isSending.value = false
         pendingRunId = null
+        pendingAltRunId = null
         pendingAssistantEntryId = null
         _statusText.value =
           if (!gatewayConnected) {
@@ -442,8 +517,9 @@ class MicCaptureManager(
     pendingRunTimeoutJob =
       scope.launch {
         delay(pendingRunTimeoutMs)
-        if (pendingRunId != runId) return@launch
+        if (pendingRunId != runId && pendingAltRunId != runId) return@launch
         pendingRunId = null
+        pendingAltRunId = null
         pendingAssistantEntryId = null
         _isSending.value = false
         _statusText.value =
@@ -459,10 +535,12 @@ class MicCaptureManager(
   private fun completePendingTurn() {
     pendingRunTimeoutJob?.cancel()
     pendingRunTimeoutJob = null
+    synchronized(earlyEventLock) { earlyEventBuffer.clear() }
     if (removeFirstQueuedMessage() != null) {
       publishQueue()
     }
     pendingRunId = null
+    pendingAltRunId = null
     pendingAssistantEntryId = null
     _isSending.value = false
     sendQueuedIfIdle()
@@ -540,9 +618,8 @@ class MicCaptureManager(
     _inputLevel.value = 0f
     _statusText.value = status
     mainHandler.post {
-      recognizer?.cancel()
-      recognizer?.destroy()
-      recognizer = null
+      backend?.destroy()
+      backend = null
     }
   }
 
@@ -568,96 +645,54 @@ class MicCaptureManager(
     return parts.joinToString("\n")
   }
 
-  private val listener =
-    object : RecognitionListener {
-      override fun onReadyForSpeech(params: Bundle?) {
+  /**
+   * Unified [AsrCallbacks] instance shared by both [BuiltInAsrBackend] and [FunAsrBackend].
+   * Encapsulates all the queue / transcript / restart logic that was previously spread across
+   * the [android.speech.RecognitionListener] methods.
+   */
+  private val asrCallbacks: AsrCallbacks =
+    object : AsrCallbacks {
+      override fun onReady() {
         _isListening.value = true
       }
 
-      override fun onBeginningOfSpeech() {}
-
-      override fun onRmsChanged(rmsdB: Float) {
-        val level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+      override fun onRmsChanged(level: Float) {
         _inputLevel.value = level
       }
 
-      override fun onBufferReceived(buffer: ByteArray?) {}
+      override fun onPartial(text: String) {
+        _liveTranscript.value = text
+        scheduleTranscriptFlush(text)
+      }
+
+      override fun onFinal(text: String) {
+        transcriptFlushJob?.cancel()
+        transcriptFlushJob = null
+        if (text != flushedPartialTranscript) {
+          queueRecognizedMessage(text)
+          sendQueuedIfIdle()
+        } else {
+          flushedPartialTranscript = null
+          _liveTranscript.value = null
+        }
+      }
+
+      override fun onError(isFatal: Boolean, statusText: String, restartDelayMs: Long) {
+        if (stopRequested) return
+        _isListening.value = false
+        _inputLevel.value = 0f
+        _statusText.value = statusText
+        if (isFatal) {
+          disableMic(statusText)
+          return
+        }
+        scheduleRestart(delayMs = restartDelayMs)
+      }
 
       override fun onEndOfSpeech() {
         _inputLevel.value = 0f
         scheduleRestart()
       }
-
-      override fun onError(error: Int) {
-        if (stopRequested) return
-        _isListening.value = false
-        _inputLevel.value = 0f
-        val status =
-          when (error) {
-            SpeechRecognizer.ERROR_AUDIO -> "Audio error"
-            SpeechRecognizer.ERROR_CLIENT -> "Client error"
-            SpeechRecognizer.ERROR_NETWORK -> "Network error"
-            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-            SpeechRecognizer.ERROR_NO_MATCH -> "Listening"
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognizer busy"
-            SpeechRecognizer.ERROR_SERVER -> "Server error"
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening"
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required"
-            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "Language not supported on this device"
-            SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "Language unavailable on this device"
-            SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "Speech service disconnected"
-            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "Speech requests limited; retrying"
-            else -> "Speech error ($error)"
-          }
-        _statusText.value = status
-
-        if (
-          error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ||
-            error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
-            error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
-        ) {
-          disableMic(status)
-          return
-        }
-
-        val restartDelayMs =
-          when (error) {
-            SpeechRecognizer.ERROR_NO_MATCH,
-            SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-            -> 1_200L
-            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> 2_500L
-            else -> 600L
-          }
-        scheduleRestart(delayMs = restartDelayMs)
-      }
-
-      override fun onResults(results: Bundle?) {
-        transcriptFlushJob?.cancel()
-        transcriptFlushJob = null
-        val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().firstOrNull()
-        if (!text.isNullOrBlank()) {
-          val trimmed = text.trim()
-          if (trimmed != flushedPartialTranscript) {
-            queueRecognizedMessage(trimmed)
-            sendQueuedIfIdle()
-          } else {
-            flushedPartialTranscript = null
-            _liveTranscript.value = null
-          }
-        }
-        scheduleRestart()
-      }
-
-      override fun onPartialResults(partialResults: Bundle?) {
-        val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().firstOrNull()
-        if (!text.isNullOrBlank()) {
-          val trimmed = text.trim()
-          _liveTranscript.value = trimmed
-          scheduleTranscriptFlush(trimmed)
-        }
-      }
-
-      override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 }
 

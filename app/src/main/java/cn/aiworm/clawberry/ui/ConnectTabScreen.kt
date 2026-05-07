@@ -144,9 +144,9 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
   val pairingRequired = !isConnected && gatewayStatusLooksLikePairing(statusText)
   val statusLabel = gatewayStatusForDisplay(statusText)
 
-  PairingAutoRetryEffect(enabled = pairingRequired) {
-    viewModel.refreshGatewayConnection()
-  }
+  // NOTE: No auto-retry during pairing. Each refreshGatewayConnection() opens a new WebSocket
+  // which causes the server to generate a new pairing request ID, making it impossible for the
+  // host admin to approve the right request. The user must tap Connect again manually after approving.
 
   Column(
     modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp),

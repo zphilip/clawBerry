@@ -339,6 +339,12 @@ class NodeRuntime(
     MicCaptureManager(
       context = appContext,
       scope = scope,
+      // Empty string → built-in SpeechRecognizer; non-empty → FunASR WebSocket backend.
+      // Reads both flags at call time so switching takes effect on next mic start.
+      asrUrl = {
+        if (prefs.useCustomAsr.value && prefs.asrUrl.value.isNotBlank()) prefs.asrUrl.value
+        else ""
+      },
       sendToGateway = { message, onRunIdKnown ->
         val idempotencyKey = UUID.randomUUID().toString()
         // Notify MicCaptureManager of the idempotency key *before* the network
@@ -601,9 +607,10 @@ class NodeRuntime(
     _isForeground.value = value
     if (value) {
       reconnectPreferredGatewayOnForeground()
-    } else {
-      stopActiveVoiceSession()
     }
+    // Voice (mic + TTS) is intentionally kept alive when the app goes to background
+    // so the user can interact with other apps while voice input is still active.
+    // The NodeForegroundService holds a FOREGROUND_SERVICE_TYPE_MICROPHONE slot for this.
   }
 
   private fun seedLastDiscoveredGateway(list: List<GatewayEndpoint>) {
@@ -691,6 +698,18 @@ class NodeRuntime(
       stopActiveVoiceSession()
     }
     // Don't re-enable on active=true; mic toggle drives that
+  }
+
+  val useCustomAsr: StateFlow<Boolean>
+    get() = prefs.useCustomAsr
+
+  fun setUseCustomAsr(value: Boolean) {
+    prefs.setUseCustomAsr(value)
+    // If mic is live, restart it immediately so the new backend takes effect.
+    if (micCapture.micEnabled.value) {
+      micCapture.setMicEnabled(false)
+      micCapture.setMicEnabled(true)
+    }
   }
 
   fun setMicEnabled(value: Boolean) {

@@ -86,6 +86,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val micEnabled: StateFlow<Boolean> = prefs.talkEnabled
   val appLanguage: StateFlow<AppLanguage> = prefs.appLanguage
   val asrUrl: StateFlow<String> = prefs.asrUrl
+  val useCustomAsr: StateFlow<Boolean> = prefs.useCustomAsr
+  val floatingOverlayEnabled: StateFlow<Boolean> = prefs.floatingOverlayEnabled
 
   val micCooldown: StateFlow<Boolean> = runtimeState(initial = false) { it.micCooldown }
   val micStatusText: StateFlow<String> = runtimeState(initial = "Mic off") { it.micStatusText }
@@ -210,6 +212,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setAsrUrl(value: String) {
     prefs.setAsrUrl(value)
+  }
+
+  fun setUseCustomAsr(value: Boolean) {
+    prefs.setUseCustomAsr(value)
+    runtimeRef.value?.setUseCustomAsr(value)
+  }
+
+  fun setFloatingOverlayEnabled(value: Boolean) {
+    prefs.setFloatingOverlayEnabled(value)
   }
 
   fun setVoiceScreenActive(active: Boolean) {

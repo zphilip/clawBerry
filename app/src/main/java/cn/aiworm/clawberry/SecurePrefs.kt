@@ -123,6 +123,26 @@ class SecurePrefs(
     _asrUrl.value = trimmed
   }
 
+  private val _useCustomAsr = MutableStateFlow(
+    plainPrefs.getBoolean("asr.useCustom", false)
+  )
+  val useCustomAsr: StateFlow<Boolean> = _useCustomAsr
+
+  private val _floatingOverlayEnabled = MutableStateFlow(
+    plainPrefs.getBoolean("ui.floatingOverlay", false),
+  )
+  val floatingOverlayEnabled: StateFlow<Boolean> = _floatingOverlayEnabled
+
+  fun setUseCustomAsr(value: Boolean) {
+    plainPrefs.edit { putBoolean("asr.useCustom", value) }
+    _useCustomAsr.value = value
+  }
+
+  fun setFloatingOverlayEnabled(value: Boolean) {
+    plainPrefs.edit { putBoolean("ui.floatingOverlay", value) }
+    _floatingOverlayEnabled.value = value
+  }
+
   fun setLastDiscoveredStableId(value: String) {
     val trimmed = value.trim()
     plainPrefs.edit { putString("gateway.lastDiscoveredStableID", trimmed) }

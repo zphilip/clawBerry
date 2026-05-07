@@ -294,6 +294,9 @@
     <string name="settings_pref_prevent_sleep_subtitle">Keep screen awake while open.</string>
     <string name="settings_pref_debug_canvas">Debug Canvas</string>
     <string name="settings_pref_debug_canvas_subtitle">Show status overlay on canvas.</string>
+    <string name="settings_pref_floating_overlay">Floating Overlay</string>
+    <string name="settings_pref_floating_overlay_subtitle">Show a bubble over other apps while voice is active.</string>
+    <string name="settings_pref_floating_overlay_grant">Allow Display Over Apps</string>
 
     <!-- Settings – ASR / Voice input -->
     <string name="settings_asr_title">ASR / VOICE INPUT</string>

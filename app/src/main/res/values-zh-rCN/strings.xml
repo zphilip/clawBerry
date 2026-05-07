@@ -293,6 +293,9 @@
     <string name="settings_pref_prevent_sleep_subtitle">保持屏幕在开启时常亮。</string>
     <string name="settings_pref_debug_canvas">调试画布</string>
     <string name="settings_pref_debug_canvas_subtitle">在画布上显示状态叠加层。</string>
+    <string name="settings_pref_floating_overlay">悬浮窗口</string>
+    <string name="settings_pref_floating_overlay_subtitle">语音运行时在其他应用上方显示悬浮球。</string>
+    <string name="settings_pref_floating_overlay_grant">允许悬浮显示</string>
 
     <!-- Settings – ASR / Voice input -->
     <string name="settings_asr_title">ASR / 语音输入</string>
