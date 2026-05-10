@@ -57,6 +57,71 @@ class MicCaptureManager(
     private const val transcriptIdleFlushMs = 1_600L
     private const val maxConversationEntries = 40
     private const val pendingRunTimeoutMs = 45_000L
+
+    /**
+     * Only one [MicCaptureManager] may hold the microphone at a time (Android's AudioRecord
+     * and SpeechRecognizer are exclusive resources). When a new instance calls [start] it
+     * atomically replaces the previous holder here and calls [stopForHandoff] on it, so the
+     * previous holder releases the mic before the new one tries to open it.
+     */
+    private val micOwner = java.util.concurrent.atomic.AtomicReference<MicCaptureManager?>(null)
+
+    /**
+     * The last instance that held the mic (persists after the mic is disabled).
+     * Used by [toggleActiveMic] to re-enable the mic even when [micOwner] is null
+     * (i.e. the mic is off but there's an instance that can be turned back on).
+     */
+    private val lastKnownMic = java.util.concurrent.atomic.AtomicReference<MicCaptureManager?>(null)
+
+    // ── Global mic state (followed by FloatingOverlayService) ─────────────────
+    /** True when any MicCaptureManager currently has its mic enabled. */
+    val globalMicEnabled = MutableStateFlow(false)
+    /** True while the current owner is actively running an ASR session. */
+    val globalMicIsListening = MutableStateFlow(false)
+
+    private val companionScope = kotlinx.coroutines.CoroutineScope(
+      kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate
+    )
+    private var ownerEnabledJob: kotlinx.coroutines.Job? = null
+    private var ownerListeningJob: kotlinx.coroutines.Job? = null
+
+    /** Start tracking [newOwner]'s state flows into the global state. Pass null to clear. */
+    private fun onOwnerChanged(newOwner: MicCaptureManager?) {
+      ownerEnabledJob?.cancel()
+      ownerListeningJob?.cancel()
+      ownerEnabledJob = null
+      ownerListeningJob = null
+      if (newOwner == null) {
+        globalMicEnabled.value = false
+        globalMicIsListening.value = false
+        return
+      }
+      lastKnownMic.set(newOwner)  // remember even after mic turns off
+      ownerEnabledJob = companionScope.launch {
+        newOwner.micEnabled.collect { globalMicEnabled.value = it }
+      }
+      ownerListeningJob = companionScope.launch {
+        newOwner.isListening.collect { globalMicIsListening.value = it }
+      }
+    }
+
+    /** Toggle the active (or last-active) mic's enabled state. */
+    fun toggleActiveMic() {
+      // Prefer the current owner; fall back to the last known instance so the user
+      // can long-press the float icon to *re-enable* the mic when it is turned off.
+      val target = micOwner.get() ?: lastKnownMic.get() ?: return
+      val turningOff = target.micEnabled.value
+      if (turningOff) userExplicitlyDisabledMic = true
+      else userExplicitlyDisabledMic = false  // user is explicitly turning it back on
+      target.setMicEnabled(!target.micEnabled.value)
+    }
+
+    /**
+     * Set by [toggleActiveMic] when the user explicitly turns off the mic from the float
+     * overlay. Cleared whenever any mic successfully starts. MainActivity checks this flag
+     * in onStop() to avoid re-enabling OpenClaw mic against the user's explicit intent.
+     */
+    @Volatile var userExplicitlyDisabledMic = false
   }
 
   private val mainHandler = Handler(Looper.getMainLooper())
@@ -127,6 +192,18 @@ class MicCaptureManager(
     synchronized(messageQueueLock) { if (messageQueue.isEmpty()) null else messageQueue.removeFirst() }
 
   private fun queuedMessageCount(): Int = synchronized(messageQueueLock) { messageQueue.size }
+
+  /**
+   * Swap the ASR backend immediately without disabling the mic.
+   * Call this when the ASR provider setting changes (e.g. built-in ↔ FunASR)
+   * while the mic is already running, so the new [asrUrl] is picked up right away.
+   * No-op if the mic is currently disabled.
+   */
+  fun switchAsr() {
+    if (!_micEnabled.value) return
+    stop()
+    start()
+  }
 
   fun setMicEnabled(enabled: Boolean) {
     if (_micEnabled.value == enabled) return
@@ -343,6 +420,18 @@ class MicCaptureManager(
       return
     }
 
+    // Claim exclusive mic ownership. If another MicCaptureManager is active, stop it
+    // immediately (without the 2-second drain) so it releases AudioRecord/SpeechRecognizer
+    // before we try to open them. Both stopForHandoff and the backend-create below are
+    // posted to mainHandler in order, so destroy always precedes create.
+    val prev = micOwner.getAndSet(this)
+    if (prev != null && prev !== this) {
+      Log.d(tag, "mic handoff: stopping previous holder")
+      prev.stopForHandoff()
+    }
+    onOwnerChanged(this)  // begin tracking this instance's flows into global state
+    userExplicitlyDisabledMic = false  // user started mic — clear any prior explicit-off flag
+
     mainHandler.post {
       try {
         if (backend == null) {
@@ -361,6 +450,8 @@ class MicCaptureManager(
   }
 
   private fun stop() {
+    val wasOwner = micOwner.compareAndSet(this, null)
+    if (wasOwner) onOwnerChanged(null)
     stopRequested = true
     restartJob?.cancel()
     restartJob = null
@@ -369,6 +460,25 @@ class MicCaptureManager(
     _isListening.value = false
     _statusText.value = if (_isSending.value) "Mic off · sending…" else "Mic off"
     _inputLevel.value = 0f
+    mainHandler.post {
+      backend?.destroy()
+      backend = null
+    }
+  }
+
+  /**
+   * Immediate stop (no drain) called when another [MicCaptureManager] takes ownership of the
+   * mic. Posts backend destroy to mainHandler so it is ordered before the new owner's create.
+   */
+  private fun stopForHandoff() {
+    stopRequested = true
+    restartJob?.cancel()
+    restartJob = null
+    transcriptFlushJob?.cancel()
+    transcriptFlushJob = null
+    _isListening.value = false
+    _inputLevel.value = 0f
+    _micEnabled.value = false
     mainHandler.post {
       backend?.destroy()
       backend = null
@@ -532,6 +642,40 @@ class MicCaptureManager(
       }
   }
 
+  // ---------------------------------------------------------------------------
+  // External assistant injection (for non-OpenClaw gateways like Zero/Pico)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Call when a streaming chunk arrives from an external gateway (Zero/Pico) that
+   * doesn't use the OpenClaw runId event format.  Appends or updates the pending
+   * assistant conversation entry and shows the "sending" indicator.
+   */
+  fun onExternalAssistantDelta(text: String) {
+    if (text.isBlank()) return
+    _isSending.value = true
+    upsertPendingAssistant(text = text, isStreaming = true)
+  }
+
+  /**
+   * Call when the external gateway signals the assistant turn is complete.
+   * [fullText] is the final accumulated reply — pass empty string to finalize
+   * whatever partial text was already shown.
+   */
+  fun onExternalAssistantComplete(fullText: String) {
+    val entryId = pendingAssistantEntryId
+    if (fullText.isNotBlank()) {
+      upsertPendingAssistant(text = fullText, isStreaming = false)
+    } else if (entryId != null) {
+      updateConversationEntry(entryId, text = null, isStreaming = false)
+    }
+    pendingAssistantEntryId = null
+    _isSending.value = false
+    if (_micEnabled.value) _statusText.value = listeningLabel()
+  }
+
+  // ---------------------------------------------------------------------------
+
   private fun completePendingTurn() {
     pendingRunTimeoutJob?.cancel()
     pendingRunTimeoutJob = null
@@ -608,6 +752,8 @@ class MicCaptureManager(
   }
 
   private fun disableMic(status: String) {
+    val wasOwner = micOwner.compareAndSet(this, null)
+    if (wasOwner) onOwnerChanged(null)
     stopRequested = true
     restartJob?.cancel()
     restartJob = null

@@ -9,6 +9,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.os.IBinder
 import android.provider.Settings
 import android.util.TypedValue
@@ -23,7 +24,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
+import clawberry.aiworm.cn.voice.MicCaptureManager
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -68,10 +71,7 @@ class FloatingOverlayService : Service() {
       startActivity(i)
     }
 
-    bubble.onClose = {
-      (application as NodeApp).prefs.setFloatingOverlayEnabled(false)
-      stopSelf()
-    }
+    bubble.onLongPress = { MicCaptureManager.toggleActiveMic() }
 
     bubble.onDrag = { dx, dy ->
       val bounds = windowManager.currentWindowMetrics.bounds
@@ -93,19 +93,19 @@ class FloatingOverlayService : Service() {
     windowManager.addView(bubble, params)
 
     val runtime = (application as NodeApp).peekRuntime()
-    if (runtime != null) {
-      stateJob = scope.launch {
-        combine(
-          runtime.isConnected,
-          runtime.micIsListening,
-          runtime.micEnabled,
-        ) { connected, listening, micEnabled ->
-          Triple(connected, listening, micEnabled)
-        }.collect { (connected, listening, micEnabled) ->
-          bubble.isConnected = connected
-          bubble.isListening = listening && micEnabled
-          bubble.invalidate()
-        }
+    stateJob = scope.launch {
+      val connectedFlow = runtime?.isConnected ?: MutableStateFlow(false)
+      combine(
+        connectedFlow,
+        MicCaptureManager.globalMicIsListening,
+        MicCaptureManager.globalMicEnabled,
+      ) { connected, listening, micEnabled ->
+        Triple(connected, listening, micEnabled)
+      }.collect { (connected, listening, micEnabled) ->
+        bubble.isConnected = connected
+        bubble.isMicEnabled = micEnabled
+        bubble.isListening = listening
+        bubble.invalidate()
       }
     }
   }
@@ -140,9 +140,10 @@ class FloatingOverlayService : Service() {
 
   inner class BubbleView(context: Context) : View(context) {
     var isConnected: Boolean = false
+    var isMicEnabled: Boolean = false
     var isListening: Boolean = false
     var onTap: () -> Unit = {}
-    var onClose: () -> Unit = {}
+    var onLongPress: () -> Unit = {}
     var onDrag: (Int, Int) -> Unit = { _, _ -> }
     var onDragEnd: () -> Unit = {}
 
@@ -160,14 +161,15 @@ class FloatingOverlayService : Service() {
 
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-    private val closeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    private val closeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val micGlyphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      style = Paint.Style.STROKE
+      strokeCap = Paint.Cap.ROUND
+      strokeWidth = dp(1.7f)
       color = Color.WHITE
-      textAlign = Paint.Align.CENTER
-      textSize = dp(18f)
-      isFakeBoldText = true
     }
+
+    private val closeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     private val pulseAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
       duration = 1_400
@@ -182,23 +184,16 @@ class FloatingOverlayService : Service() {
 
     private var pulseProgress = 0f
     private var iconBitmap: Bitmap? = null
-    private var showClose = false
-    private var closeHideJob: Job? = null
 
     // Touch state
     private var downX = 0f
     private var downY = 0f
     private var moved = false
+    private var longPressed = false
 
     private val longPressRunnable = Runnable {
-      showClose = true
-      closeHideJob?.cancel()
-      closeHideJob = scope.launch {
-        delay(3_000)
-        showClose = false
-        postInvalidate()
-      }
-      invalidate()
+      longPressed = true
+      onLongPress()
     }
 
     init {
@@ -217,7 +212,6 @@ class FloatingOverlayService : Service() {
     override fun onDetachedFromWindow() {
       super.onDetachedFromWindow()
       pulseAnimator.cancel()
-      closeHideJob?.cancel()
       removeCallbacks(longPressRunnable)
     }
 
@@ -235,13 +229,14 @@ class FloatingOverlayService : Service() {
       }
 
       // Background
-      bgPaint.color = Color.argb(220, 26, 28, 32)
+      bgPaint.color = if (isMicEnabled) Color.argb(224, 229, 57, 53) else Color.argb(224, 29, 93, 216)
       canvas.drawCircle(cx, cy, radius, bgPaint)
 
       // Border – colour signals connection + mic state
       borderPaint.color = when {
-        isListening -> Color.rgb(14, 165, 233)   // sky-blue: mic active
-        isConnected -> Color.rgb(34, 197, 94)    // green: connected + idle
+        isListening -> Color.rgb(14, 165, 233)   // listening pulse
+        isMicEnabled -> Color.rgb(255, 255, 255) // same emphasis as active mic button
+        isConnected -> Color.rgb(34, 197, 94)
         else -> Color.argb(120, 140, 150, 165)   // grey: offline
       }
       canvas.drawCircle(cx, cy, radius, borderPaint)
@@ -251,12 +246,29 @@ class FloatingOverlayService : Service() {
         canvas.drawBitmap(bmp, cx - bmp.width / 2f, cy - bmp.height / 2f, iconPaint)
       }
 
-      // Close overlay (shown after long-press, auto-hides after 3 s)
-      if (showClose) {
-        closeBgPaint.color = Color.argb(210, 180, 40, 40)
-        canvas.drawCircle(cx, cy, radius, closeBgPaint)
-        canvas.drawText("✕", cx, cy + dp(6f), closeTextPaint)
+      // Mic-state badge: mirrors voice-tab semantics (enabled => "MicOff" slash).
+      val badgeR = dp(11f)
+      val badgeCx = cx + radius * 0.58f
+      val badgeCy = cy + radius * 0.58f
+      badgePaint.color = if (isMicEnabled) Color.rgb(229, 57, 53) else Color.rgb(14, 165, 233)
+      canvas.drawCircle(badgeCx, badgeCy, badgeR, badgePaint)
+
+      val bodyRect = RectF(badgeCx - dp(3f), badgeCy - dp(4.8f), badgeCx + dp(3f), badgeCy + dp(1f))
+      canvas.drawRoundRect(bodyRect, dp(2.2f), dp(2.2f), micGlyphPaint)
+      canvas.drawLine(badgeCx, badgeCy + dp(1f), badgeCx, badgeCy + dp(4.2f), micGlyphPaint)
+      canvas.drawLine(badgeCx - dp(2.4f), badgeCy + dp(4.2f), badgeCx + dp(2.4f), badgeCy + dp(4.2f), micGlyphPaint)
+      if (isMicEnabled) {
+        // Diagonal slash = same intent as MicOff icon in VoiceTab.
+        canvas.drawLine(
+          badgeCx - dp(4.6f),
+          badgeCy + dp(4.6f),
+          badgeCx + dp(4.6f),
+          badgeCy - dp(4.6f),
+          micGlyphPaint,
+        )
       }
+
+      // Close overlay removed; long press now toggles mic (see onLongPress callback)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -265,6 +277,7 @@ class FloatingOverlayService : Service() {
           downX = event.rawX
           downY = event.rawY
           moved = false
+          longPressed = false
           postDelayed(longPressRunnable, 500)
           return true
         }
@@ -275,7 +288,6 @@ class FloatingOverlayService : Service() {
           if (!moved && (abs(dx) > 8 || abs(dy) > 8)) {
             moved = true
             removeCallbacks(longPressRunnable)
-            showClose = false
           }
           if (moved) {
             onDrag(dx, dy)
@@ -289,7 +301,7 @@ class FloatingOverlayService : Service() {
           removeCallbacks(longPressRunnable)
           when {
             moved -> onDragEnd()
-            showClose -> onClose()
+            longPressed -> { /* long press already handled — don't bring app to front */ }
             else -> onTap()
           }
           return true

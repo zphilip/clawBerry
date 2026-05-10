@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -104,6 +105,7 @@ import clawberry.aiworm.cn.picoclaw.PcImageAttachment
 import clawberry.aiworm.cn.picoclaw.PcMode
 import clawberry.aiworm.cn.picoclaw.PcState
 import clawberry.aiworm.cn.picoclaw.PicoClawViewModel
+import clawberry.aiworm.cn.MainViewModel
 import clawberry.aiworm.cn.ui.chat.ChatMarkdown
 import clawberry.aiworm.cn.ui.chat.PendingImageAttachment
 import clawberry.aiworm.cn.ui.chat.loadSizedImageAttachment
@@ -128,6 +130,7 @@ import androidx.compose.ui.res.stringResource
 private enum class PcTab(@param:StringRes val labelRes: Int, val icon: ImageVector) {
     Connect(labelRes = R.string.common_connect, icon = Icons.Default.CheckCircle),
     Chat(labelRes = R.string.common_chat, icon = Icons.Default.ChatBubble),
+    Voice(labelRes = R.string.common_voice, icon = Icons.Default.RecordVoiceOver),
     Settings(labelRes = R.string.tab_settings, icon = Icons.Default.Settings),
 }
 
@@ -146,8 +149,30 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
     val mode by viewModel.mode.collectAsState()
     val token by viewModel.token.collectAsState()
     val tokenInput by viewModel.tokenInput.collectAsState()
+    val micEnabled by viewModel.micEnabled.collectAsState()
+    val micCooldown by viewModel.micCooldown.collectAsState()
+    val micIsListening by viewModel.micIsListening.collectAsState()
+    val micStatusText by viewModel.micStatusText.collectAsState()
+    val micLiveTranscript by viewModel.micLiveTranscript.collectAsState()
+    val micConversation by viewModel.micConversation.collectAsState()
+    val micInputLevel by viewModel.micInputLevel.collectAsState()
+    val micIsSending by viewModel.micIsSending.collectAsState()
+    val useCustomAsr by viewModel.useCustomAsr.collectAsState()
+    val asrUrl by viewModel.asrUrl.collectAsState()
 
     var activeTab by rememberSaveable { mutableStateOf(PcTab.Connect) }
+    val pcTabVoice = stringResource(R.string.common_voice)
+    val voiceStatusText = when (state) {
+        PcState.Connected -> "$host:${when (mode) {
+            PcMode.WebBackend -> webPort
+            PcMode.Direct -> gatewayPort
+            PcMode.Proxy -> proxyPort
+        }}"
+        PcState.FetchingToken, PcState.Connecting -> stringResource(R.string.pc_status_connecting)
+        PcState.Reconnecting -> stringResource(R.string.pc_status_reconnecting)
+        PcState.Error -> errorText ?: stringResource(R.string.common_error)
+        PcState.Idle -> stringResource(R.string.common_offline)
+    }
 
     LaunchedEffect(state) {
         when (state) {
@@ -198,9 +223,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                 PcTab.Chat -> PcChatTab(
                     isConnected = state == PcState.Connected,
                     messages = messages,
-                    asrUrl = LocalContext.current
-                        .getSharedPreferences("openclaw.node", android.content.Context.MODE_PRIVATE)
-                        .getString("asr.url", "wss://asr.aiworm.cn:443") ?: "wss://asr.aiworm.cn:443",
+                    asrUrl = asrUrl,
                     asrMode = asrModeState.value,
                     onAsrModeChange = { asrModeState.value = it },
                     onSend = { text, atts ->
@@ -214,6 +237,24 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     onStop = viewModel::stopStreaming,
                     onGoConnect = { activeTab = PcTab.Connect },
                 )
+                PcTab.Voice ->
+                    GatewayVoiceTab(
+                        gatewayName = "PicoClaw",
+                        statusText = voiceStatusText,
+                        isConnected = state == PcState.Connected,
+                        micEnabled = micEnabled,
+                        micCooldown = micCooldown,
+                        isListening = micIsListening,
+                        micStatusText = micStatusText,
+                        liveTranscript = micLiveTranscript,
+                        conversation = micConversation,
+                        inputLevel = micInputLevel,
+                        isSending = micIsSending,
+                        useCustomAsr = useCustomAsr,
+                        asrUrl = asrUrl,
+                        onSetUseCustomAsr = viewModel::setUseCustomAsr,
+                        onSetMicEnabled = viewModel::setMicEnabled,
+                    )
                 PcTab.Settings -> PcSettingsTab(
                     host = host,
                     webPort = webPort,
@@ -243,6 +284,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     when (tab) {
                         PcTab.Connect -> pcTabConnect
                         PcTab.Chat -> pcTabChat
+                        PcTab.Voice -> pcTabVoice
                         PcTab.Settings -> pcTabSettings
                     }
                 },
@@ -1296,6 +1338,33 @@ private fun PcComposer(
     val voiceRecorder = remember { VoiceRecorder() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var hasMicPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    var pendingMicEnable by remember { mutableStateOf(false) }
+    val requestMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasMicPermission = granted
+        if (!granted) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.openclaw_voice_permission_required),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            pendingMicEnable = false
+            return@rememberLauncherForActivityResult
+        }
+        if (pendingMicEnable) {
+            capturedPcm = null
+            voiceRecorder.start()
+            voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
+        }
+        pendingMicEnable = false
+    }
     DisposableEffect(Unit) { onDispose { voiceRecorder.release() } }
     val canSend = text.isNotBlank() || attachments.isNotEmpty()
 
@@ -1389,6 +1458,11 @@ private fun PcComposer(
                 onClick = {
                     when (voiceState) {
                         clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle -> {
+                            if (!hasMicPermission) {
+                                pendingMicEnable = true
+                                requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                return@PcIconButton
+                            }
                             capturedPcm = null
                             voiceRecorder.start()
                             voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
@@ -1418,6 +1492,11 @@ private fun PcComposer(
                                     }
                                 }
                             } else {
+                                if (!hasMicPermission) {
+                                    pendingMicEnable = true
+                                    requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                    return@PcIconButton
+                                }
                                 voiceRecorder.start()
                                 voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
                             }

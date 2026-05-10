@@ -1014,6 +1014,18 @@ fun SettingsSheet(viewModel: MainViewModel) {
         }
       }
 
+      // ── Voice Print ──
+      item {
+        Text(
+          if (appLanguage == AppLanguage.ChineseSimplified) "声纹身份" else "VOICE PRINT",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        VoicePrintSettingsCard(viewModel = viewModel)
+      }
+
       item { Spacer(modifier = Modifier.height(24.dp)) }
     }
   }

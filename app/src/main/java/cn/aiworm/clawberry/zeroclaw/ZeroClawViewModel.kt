@@ -16,6 +16,8 @@ import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import clawberry.aiworm.cn.voice.MicCaptureManager
+import clawberry.aiworm.cn.voice.VoiceConversationEntry
 
 // ---------------------------------------------------------------------------
 // State machine
@@ -64,6 +66,7 @@ sealed class ZcSessionPickerState {
 class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
   private val prefs = app.getSharedPreferences("zeroclaw.direct", Context.MODE_PRIVATE)
+  private val asrPrefs = app.getSharedPreferences("openclaw.node", Context.MODE_PRIVATE)
   private val client = OkHttpClient.Builder()
     .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
     .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
@@ -85,6 +88,14 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   val useProxy = MutableStateFlow(prefs.getBoolean("use_proxy", false))
   val proxyPort = MutableStateFlow(prefs.getInt("proxy_port", 18780))
 
+  private val _asrUrl = MutableStateFlow(
+    asrPrefs.getString("asr.url", "wss://asr.aiworm.cn:443") ?: "wss://asr.aiworm.cn:443",
+  )
+  val asrUrl: StateFlow<String> = _asrUrl.asStateFlow()
+
+  private val _useCustomAsr = MutableStateFlow(asrPrefs.getBoolean("asr.useCustom", false))
+  val useCustomAsr: StateFlow<Boolean> = _useCustomAsr.asStateFlow()
+
   private val _token = MutableStateFlow<String?>(prefs.getString("token", null))
   val token: StateFlow<String?> = _token.asStateFlow()
 
@@ -100,6 +111,38 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
   private val _sessionPicker = MutableStateFlow<ZcSessionPickerState>(ZcSessionPickerState.Hidden)
   val sessionPicker: StateFlow<ZcSessionPickerState> = _sessionPicker.asStateFlow()
+
+  // --- Voice (always-listening mic) ---
+  private val mic: MicCaptureManager = MicCaptureManager(
+    context = app.applicationContext,
+    scope = viewModelScope,
+    asrUrl = {
+      if (_useCustomAsr.value && _asrUrl.value.isNotBlank()) _asrUrl.value else ""
+    },
+    sendToGateway = { message, onRunIdKnown ->
+      onRunIdKnown(UUID.randomUUID().toString())
+      sendMessage(message)
+      null  // no runId tracking — responses come via onExternalAssistant*
+    },
+    speakAssistantReply = {},   // no TTS for Zero/Pico voice tab
+  )
+
+  val micEnabled: StateFlow<Boolean> = mic.micEnabled
+  val micCooldown: StateFlow<Boolean> = mic.micCooldown
+  val micIsListening: StateFlow<Boolean> = mic.isListening
+  val micStatusText: StateFlow<String> = mic.statusText
+  val micLiveTranscript: StateFlow<String?> = mic.liveTranscript
+  val micConversation: StateFlow<List<VoiceConversationEntry>> = mic.conversation
+  val micInputLevel: StateFlow<Float> = mic.inputLevel
+  val micIsSending: StateFlow<Boolean> = mic.isSending
+
+  fun setMicEnabled(enabled: Boolean) = mic.setMicEnabled(enabled)
+
+  fun setUseCustomAsr(value: Boolean) {
+    asrPrefs.edit().putBoolean("asr.useCustom", value).apply()
+    _useCustomAsr.value = value
+    mic.switchAsr()  // restart backend to pick up the new ASR type
+  }
 
   // --- Internal ---
   private var webSocket: okhttp3.WebSocket? = null
@@ -265,6 +308,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
         reconnectJob = null
         _errorText.value = null
         _state.value = ZcState.Connected
+        mic.onGatewayConnectionChanged(true)
       }
 
       is ZcEvent.Chunk -> {
@@ -281,6 +325,9 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
         _messages.update { msgs ->
           msgs.map { if (it.id == id) it.copy(content = it.content + event.content) else it }
         }
+        // Accumulate chunk in the current streaming message text and forward to voice UI
+        val accum = _messages.value.find { it.id == streamingMsgId }?.content ?: event.content
+        mic.onExternalAssistantDelta(accum)
       }
 
       is ZcEvent.Done -> {
@@ -298,9 +345,14 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
               }
             }
           }
+          val finalText = event.fullResponse.ifEmpty {
+            _messages.value.find { it.id == id }?.content ?: ""
+          }
+          mic.onExternalAssistantComplete(finalText)
           streamingMsgId = null
         } else if (event.fullResponse.isNotEmpty()) {
           _messages.update { it + ZcChatMessage(role = "assistant", content = event.fullResponse) }
+          mic.onExternalAssistantComplete(event.fullResponse)
         }
       }
 
@@ -339,6 +391,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
       }
 
       is ZcEvent.Disconnected -> {
+        mic.onGatewayConnectionChanged(false)
         // Seal any partial streaming bubble so the user can see what arrived
         val sid = streamingMsgId
         if (sid != null) {
@@ -483,6 +536,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
   override fun onCleared() {
     super.onCleared()
+    mic.setMicEnabled(false)
     reconnectJob?.cancel()
     webSocket?.cancel()
     webSocket = null

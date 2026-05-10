@@ -74,6 +74,8 @@ class FunAsrBackend(
         private const val SILENCE_FINAL_MS = 1_500L
         /** Session timeout when no speech is ever detected (like ERROR_SPEECH_TIMEOUT). */
         private const val SPEECH_TIMEOUT_MS = 8_000L
+        /** Ignore local startup beep / recorder wake-up noise at the beginning of each session. */
+        private const val STARTUP_IGNORE_MS = 450L
 
         // ── OkHttp ───────────────────────────────────────────────────────────
         private const val SOCKET_TAG = 0x4153_5201 // 'ASR\1'
@@ -167,6 +169,7 @@ class FunAsrBackend(
         var speechDetected = false
         var lastActiveMs = System.currentTimeMillis()
         val sessionStartMs = System.currentTimeMillis()
+        val startupIgnoreUntilMs = sessionStartMs + STARTUP_IGNORE_MS
         val partials = mutableListOf<String>()
 
         // Audio frames captured before the WS handshake are held here and flushed once
@@ -256,16 +259,21 @@ class FunAsrBackend(
 
         val buf = ByteArray(AUDIO_STRIDE)
         try {
-            while (currentCoroutineContext().isActive && !destroyed) {
+            // Also exit when sessionFinished is set externally (e.g. onFailure) so the
+            // coroutine doesn't linger for up to SPEECH_TIMEOUT_MS reading silent audio.
+            while (currentCoroutineContext().isActive && !destroyed && !sessionFinished.get()) {
                 val read = r.read(buf, 0, buf.size)
                 if (read <= 0) { delay(10); continue }
+
+                val nowMs = System.currentTimeMillis()
+                val inStartupIgnoreWindow = nowMs < startupIgnoreUntilMs
 
                 val linearRms = computeLinearRms(buf, read)
 
                 // Ring animation: emit 0 during silence so the ring drops immediately
                 // (matching built-in ASR's _inputLevel = 0f in onEndOfSpeech).
                 // During speech, use a log-scaled level that visually matches built-in ASR.
-                val level = if (linearRms >= SILENCE_THRESHOLD) {
+                val level = if (!inStartupIgnoreWindow && linearRms >= SILENCE_THRESHOLD) {
                     ((20f * log10(linearRms) + 60f) / 60f).coerceIn(0.05f, 1f)
                 } else {
                     0f
@@ -276,20 +284,21 @@ class FunAsrBackend(
                 // be flushed before live audio starts flowing.
                 val ready = synchronized(preBufferLock) {
                     if (!wsReady.get()) {
-                        if (preBuffer.size < maxPreFrames) preBuffer.add(buf.copyOf(read))
+                        if (!inStartupIgnoreWindow && preBuffer.size < maxPreFrames) {
+                            preBuffer.add(buf.copyOf(read))
+                        }
                         false
                     } else true
                 }
-                if (ready && !isSpeakingSignalSent) {
+                if (ready && !isSpeakingSignalSent && !inStartupIgnoreWindow) {
                     ws.send(buf.copyOf(read).toByteString())
                 }
 
-                if (linearRms >= SILENCE_THRESHOLD) {
+                if (!inStartupIgnoreWindow && linearRms >= SILENCE_THRESHOLD) {
                     speechDetected = true
-                    lastActiveMs = System.currentTimeMillis()
+                    lastActiveMs = nowMs
                 }
 
-                val nowMs = System.currentTimeMillis()
                 if (speechDetected) {
                     val silentMs = nowMs - lastActiveMs
                     if (silentMs >= SILENCE_FINAL_MS && !isSpeakingSignalSent && wsReady.get()) {
@@ -299,6 +308,11 @@ class FunAsrBackend(
                         // Wait for server final; onMessage sets sessionFinished=true so the
                         // ws.cancel() in finally is suppressed.
                         delay(5_000)
+                        // If the server never replied with a final, fire onEndOfSpeech now so
+                        // MicCaptureManager can scheduleRestart() and keep listening.
+                        if (!sessionFinished.get()) {
+                            callbacks.onEndOfSpeech()
+                        }
                         break
                     }
                 } else {

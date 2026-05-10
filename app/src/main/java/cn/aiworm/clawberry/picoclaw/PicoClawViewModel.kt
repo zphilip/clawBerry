@@ -19,6 +19,8 @@ import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import clawberry.aiworm.cn.voice.MicCaptureManager
+import clawberry.aiworm.cn.voice.VoiceConversationEntry
 
 // ---------------------------------------------------------------------------
 // State machine
@@ -62,6 +64,7 @@ data class PcChatMessage(
 class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("picoclaw.direct", Context.MODE_PRIVATE)
+    private val asrPrefs = app.getSharedPreferences("openclaw.node", Context.MODE_PRIVATE)
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
@@ -83,6 +86,14 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     )
     val tokenInput = MutableStateFlow(prefs.getString("tokenInput", "") ?: "")
 
+    private val _asrUrl = MutableStateFlow(
+        asrPrefs.getString("asr.url", "wss://asr.aiworm.cn:443") ?: "wss://asr.aiworm.cn:443",
+    )
+    val asrUrl: StateFlow<String> = _asrUrl.asStateFlow()
+
+    private val _useCustomAsr = MutableStateFlow(asrPrefs.getBoolean("asr.useCustom", false))
+    val useCustomAsr: StateFlow<Boolean> = _useCustomAsr.asStateFlow()
+
     private val _token = MutableStateFlow<String?>(prefs.getString("token", null))
     val token: StateFlow<String?> = _token.asStateFlow()
 
@@ -103,6 +114,38 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var pendingReconnect = false
     private val msgCounter = AtomicInteger(0)
 
+    // ── Voice (always-listening mic) ──────────────────────────────────────────
+    private val mic: MicCaptureManager = MicCaptureManager(
+        context = app.applicationContext,
+        scope = viewModelScope,
+        asrUrl = {
+            if (_useCustomAsr.value && _asrUrl.value.isNotBlank()) _asrUrl.value else ""
+        },
+        sendToGateway = { message, onRunIdKnown ->
+            onRunIdKnown(java.util.UUID.randomUUID().toString())
+            sendMessage(message)
+            null  // no runId tracking — responses come via onExternalAssistant*
+        },
+        speakAssistantReply = {},   // no TTS for Pico voice tab
+    )
+
+    val micEnabled: StateFlow<Boolean> = mic.micEnabled
+    val micCooldown: StateFlow<Boolean> = mic.micCooldown
+    val micIsListening: StateFlow<Boolean> = mic.isListening
+    val micStatusText: StateFlow<String> = mic.statusText
+    val micLiveTranscript: StateFlow<String?> = mic.liveTranscript
+    val micConversation: StateFlow<List<VoiceConversationEntry>> = mic.conversation
+    val micInputLevel: StateFlow<Float> = mic.inputLevel
+    val micIsSending: StateFlow<Boolean> = mic.isSending
+
+    fun setMicEnabled(enabled: Boolean) = mic.setMicEnabled(enabled)
+
+    fun setUseCustomAsr(value: Boolean) {
+        asrPrefs.edit().putBoolean("asr.useCustom", value).apply()
+        _useCustomAsr.value = value
+        mic.switchAsr()  // restart backend to pick up the new ASR type
+    }
+
     // ── Auto-reconnect ────────────────────────────────────────────────────────
     private var reconnectJob: Job? = null
     @Volatile private var reconnectAttempt = 0
@@ -111,6 +154,7 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     // Cached to avoid re-fetching settings mid-reconnect
     @Volatile private var cachedWsUrl: String? = null
     @Volatile private var cachedToken: String? = null
+    @Volatile private var typingActive = false
 
     // ── Persisted setters ─────────────────────────────────────────────────────
     fun setHost(v: String) {
@@ -223,11 +267,14 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                 reconnectAttempt = 0
                 reconnectJob = null
                 wasUserDisconnect = false
+                typingActive = false
                 _errorText.value = null
                 _state.value = PcState.Connected
+                mic.onGatewayConnectionChanged(true)
             }
 
             is PcEvent.TypingStart -> {
+                typingActive = true
                 _messages.update { msgs ->
                     if (msgs.none { it.role == "typing" }) {
                         msgs + PcChatMessage(role = "typing", content = "")
@@ -236,7 +283,11 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             is PcEvent.TypingStop -> {
+                typingActive = false
                 _messages.update { msgs -> msgs.filter { it.role != "typing" } }
+                // Finalize voice UI with the last known assistant message content
+                val lastContent = _messages.value.lastOrNull { it.role == "assistant" }?.content ?: ""
+                mic.onExternalAssistantComplete(lastContent)
             }
 
             is PcEvent.MessageCreate -> {
@@ -247,6 +298,10 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                             content = event.content,
                             serverMessageId = event.messageId.ifBlank { null },
                         )
+                }
+                mic.onExternalAssistantDelta(event.content)
+                if (!typingActive) {
+                    mic.onExternalAssistantComplete(event.content)
                 }
             }
 
@@ -268,18 +323,26 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                             )
                     }
                 }
+                mic.onExternalAssistantDelta(event.content)
+                if (!typingActive) {
+                    mic.onExternalAssistantComplete(event.content)
+                }
             }
 
             is PcEvent.Errored -> {
+                typingActive = false
                 _errorText.value = event.message
                 if (_state.value == PcState.Connected) {
                     _messages.update {
                         it + PcChatMessage(role = "system_error", content = event.message)
                     }
                 }
+                mic.onExternalAssistantComplete(event.message)
             }
 
             is PcEvent.Disconnected -> {
+                typingActive = false
+                mic.onGatewayConnectionChanged(false)
                 webSocket = null
                 _messages.update { msgs -> msgs.filter { it.role != "typing" } }
                 if (wasUserDisconnect) {
@@ -447,6 +510,7 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         super.onCleared()
+        mic.setMicEnabled(false)
         reconnectJob?.cancel()
         webSocket?.cancel()
         webSocket = null

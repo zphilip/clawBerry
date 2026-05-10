@@ -1,5 +1,6 @@
 ﻿package clawberry.aiworm.cn.ui
 
+import android.Manifest
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -128,6 +130,7 @@ import kotlinx.coroutines.withContext
 private enum class ZcTab(@param:StringRes val labelRes: Int, val icon: ImageVector) {
     Connect(labelRes = R.string.common_connect, icon = Icons.Default.CheckCircle),
     Chat(labelRes = R.string.common_chat, icon = Icons.Default.ChatBubble),
+    Voice(labelRes = R.string.common_voice, icon = Icons.Default.RecordVoiceOver),
     Settings(labelRes = R.string.tab_settings, icon = Icons.Default.Settings),
 }
 
@@ -147,6 +150,17 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
     val sessionPicker by viewModel.sessionPicker.collectAsState()
     val useProxy by viewModel.useProxy.collectAsState()
     val proxyPort by viewModel.proxyPort.collectAsState()
+    val reconnectAttempt by viewModel.reconnectAttempt.collectAsState()
+    val micEnabled by viewModel.micEnabled.collectAsState()
+    val micCooldown by viewModel.micCooldown.collectAsState()
+    val micIsListening by viewModel.micIsListening.collectAsState()
+    val micStatusText by viewModel.micStatusText.collectAsState()
+    val micLiveTranscript by viewModel.micLiveTranscript.collectAsState()
+    val micConversation by viewModel.micConversation.collectAsState()
+    val micInputLevel by viewModel.micInputLevel.collectAsState()
+    val micIsSending by viewModel.micIsSending.collectAsState()
+    val useCustomAsr by viewModel.useCustomAsr.collectAsState()
+    val asrUrl by viewModel.asrUrl.collectAsState()
 
     var activeTab by rememberSaveable { mutableStateOf(ZcTab.Connect) }
 
@@ -162,6 +176,15 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
     }
 
     val isConnected = state == ZcState.Connected
+    val zcTabVoice = stringResource(R.string.common_voice)
+    val voiceStatusText = when (state) {
+        ZcState.Connected -> if (useProxy) "$host:$proxyPort" else "$host:$port"
+        ZcState.Reconnecting -> stringResource(R.string.zc_reconnecting_attempt, reconnectAttempt)
+        ZcState.Connecting, ZcState.HealthChecking, ZcState.Pairing -> stringResource(R.string.zc_status_connecting)
+        ZcState.NeedsPairing -> stringResource(R.string.zc_status_pairing_required)
+        ZcState.Error -> errorText ?: stringResource(R.string.common_error)
+        ZcState.Idle -> stringResource(R.string.common_offline)
+    }
 
     Column(modifier = Modifier.fillMaxSize().imePadding()) {
         // ── Top status bar ────────────────────────────────────────────────────
@@ -190,9 +213,7 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                     ZcChatTab(
                         isConnected = isConnected,
                         messages = messages,
-                        asrUrl = LocalContext.current
-                            .getSharedPreferences("openclaw.node", android.content.Context.MODE_PRIVATE)
-                            .getString("asr.url", "wss://asr.aiworm.cn:443") ?: "wss://asr.aiworm.cn:443",
+                        asrUrl = asrUrl,
                         onSend = { text, atts ->
                             viewModel.sendMessage(
                                 text,
@@ -203,6 +224,25 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                         onRefresh = { viewModel.regenerateLastMessage() },
                         onStop = { viewModel.stopStreaming() },
                         onGoConnect = { activeTab = ZcTab.Connect },
+                    )
+
+                ZcTab.Voice ->
+                    GatewayVoiceTab(
+                        gatewayName = "ZeroClaw",
+                        statusText = voiceStatusText,
+                        isConnected = isConnected,
+                        micEnabled = micEnabled,
+                        micCooldown = micCooldown,
+                        isListening = micIsListening,
+                        micStatusText = micStatusText,
+                        liveTranscript = micLiveTranscript,
+                        conversation = micConversation,
+                        inputLevel = micInputLevel,
+                        isSending = micIsSending,
+                        useCustomAsr = useCustomAsr,
+                        asrUrl = asrUrl,
+                        onSetUseCustomAsr = viewModel::setUseCustomAsr,
+                        onSetMicEnabled = { viewModel.setMicEnabled(it) },
                     )
 
                 ZcTab.Settings ->
@@ -227,6 +267,7 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                     when (tab) {
                         ZcTab.Connect -> zcTabConnect
                         ZcTab.Chat -> zcTabChat
+                        ZcTab.Voice -> zcTabVoice
                         ZcTab.Settings -> zcTabSettings
                     }
                 },
@@ -508,6 +549,29 @@ private fun ZcConnectTab(
                         style = mobileCallout,
                         color = if (state == ZcState.Reconnecting) Color(0xFFFFA726) else mobileTextSecondary,
                     )
+                }
+                if (state == ZcState.Reconnecting) {
+                    Button(
+                        onClick = { viewModel.disconnect() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = mobileCardSurface,
+                            contentColor = Color(0xFFFFA726),
+                        ),
+                        border = BorderStroke(1.dp, Color(0xFFFFA726).copy(alpha = 0.4f)),
+                    ) {
+                        Icon(
+                            Icons.Default.PowerSettingsNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.common_disconnect_action),
+                            style = mobileHeadline.copy(fontWeight = FontWeight.SemiBold),
+                        )
+                    }
                 }
             }
 
@@ -1055,6 +1119,33 @@ private fun ZcComposer(
     val voiceRecorder = remember { VoiceRecorder() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var hasMicPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    var pendingMicEnable by remember { mutableStateOf(false) }
+    val requestMicPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        hasMicPermission = granted
+        if (!granted) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.openclaw_voice_permission_required),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            pendingMicEnable = false
+            return@rememberLauncherForActivityResult
+        }
+        if (pendingMicEnable) {
+            capturedPcm = null
+            voiceRecorder.start()
+            voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
+        }
+        pendingMicEnable = false
+    }
     DisposableEffect(Unit) { onDispose { voiceRecorder.release() } }
     val canSend = input.isNotBlank() || attachments.isNotEmpty()
 
@@ -1156,6 +1247,11 @@ private fun ZcComposer(
                 onClick = {
                     when (voiceState) {
                         clawberry.aiworm.cn.ui.chat.AsrVoiceState.Idle -> {
+                            if (!hasMicPermission) {
+                                pendingMicEnable = true
+                                requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                return@ZcActionButton
+                            }
                             capturedPcm = null
                             voiceRecorder.start()
                             voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
@@ -1185,6 +1281,11 @@ private fun ZcComposer(
                                     }
                                 }
                             } else {
+                                if (!hasMicPermission) {
+                                    pendingMicEnable = true
+                                    requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                    return@ZcActionButton
+                                }
                                 voiceRecorder.start()
                                 voiceState = clawberry.aiworm.cn.ui.chat.AsrVoiceState.Recording
                             }
