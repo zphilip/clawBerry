@@ -45,6 +45,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -74,9 +75,11 @@ import clawberry.aiworm.cn.node.DeviceNotificationListenerService
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.res.stringResource
+import clawberry.aiworm.cn.voice.KwsTtsPlayer
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
@@ -95,6 +98,24 @@ fun SettingsSheet(viewModel: MainViewModel) {
   val appLanguage by viewModel.appLanguage.collectAsState()
   val asrUrl by viewModel.asrUrl.collectAsState()
   var asrUrlDraft by rememberSaveable(asrUrl) { mutableStateOf(asrUrl) }
+  val kwsGreeting by viewModel.kwsGreeting.collectAsState()
+  var kwsGreetingDraft by rememberSaveable(kwsGreeting) { mutableStateOf(kwsGreeting) }
+  val kwsTitle by viewModel.kwsTitle.collectAsState()
+  var kwsTitleDraft by rememberSaveable(kwsTitle) { mutableStateOf(kwsTitle) }
+  val kwsRetryPhrase by viewModel.kwsRetryPhrase.collectAsState()
+  var kwsRetryPhraseDraft by rememberSaveable(kwsRetryPhrase) { mutableStateOf(kwsRetryPhrase) }
+  val kwsSuccessPhrase by viewModel.kwsSuccessPhrase.collectAsState()
+  var kwsSuccessPhraseDraft by rememberSaveable(kwsSuccessPhrase) { mutableStateOf(kwsSuccessPhrase) }
+  val kwsAckPhrase by viewModel.kwsAckPhrase.collectAsState()
+  var kwsAckPhraseDraft by rememberSaveable(kwsAckPhrase) { mutableStateOf(kwsAckPhrase) }
+  val identityAsrThreshold by viewModel.identityAsrThreshold.collectAsState()
+
+  // Self-contained TTS player for the greeting preview — works even before NodeRuntime starts
+  val greetingPreviewScope = rememberCoroutineScope()
+  val greetingPreviewPlayer = remember(context) {
+    KwsTtsPlayer(context, greetingPreviewScope).also { it.init() }
+  }
+  DisposableEffect(greetingPreviewPlayer) { onDispose { greetingPreviewPlayer.release() } }
 
   val listState = rememberLazyListState()
   val deviceModel =
@@ -1017,6 +1038,318 @@ fun SettingsSheet(viewModel: MainViewModel) {
       // ── Voice Print ──
       item {
         Text(
+          if (appLanguage == AppLanguage.ChineseSimplified) "唤醒词设置" else "WAKE WORD",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        Column(modifier = Modifier.settingsRowModifier()) {
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "欢迎词" else "Greeting",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "检测到唤醒词时播放的语音" else "Spoken when wake word is detected",
+                style = mobileCallout,
+              )
+            },
+          )
+          OutlinedTextField(
+            value = kwsGreetingDraft,
+            onValueChange = { kwsGreetingDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp),
+            singleLine = true,
+            placeholder = { Text("你好主人", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (kwsGreetingDraft.trim() != kwsGreeting) {
+                Button(
+                  onClick = { viewModel.setKwsGreeting(kwsGreetingDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.End,
+          ) {
+            OutlinedButton(
+              onClick = {
+                val text = kwsGreetingDraft.trim().ifEmpty { kwsGreeting }
+                greetingPreviewPlayer.playText(text)
+              },
+              shape = RoundedCornerShape(8.dp),
+              border = BorderStroke(1.dp, mobileAccent),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+            ) {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "试听" else "Preview",
+                style = mobileCallout,
+              )
+            }
+          }
+          HorizontalDivider(color = mobileBorder)
+          // ── 称呼 (title / honorific) ──
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "称呼" else "Title",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "用于所有语音播报中的称呼，如\u201c主人\u201d" else "Honorific used in all voice announcements",
+                style = mobileCallout,
+              )
+            },
+          )
+          OutlinedTextField(
+            value = kwsTitleDraft,
+            onValueChange = { kwsTitleDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            singleLine = true,
+            placeholder = { Text("主人", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (kwsTitleDraft.trim() != kwsTitle) {
+                Button(
+                  onClick = { viewModel.setKwsTitle(kwsTitleDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
+          HorizontalDivider(color = mobileBorder)
+          // ── 执行确认 (command acknowledgment phrase) ──
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "执行确认" else "Command Acknowledgment",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "收到语音指令后的回应（称呼和指令内容会自动加在前后）" else "Spoken after receiving a command (title prepended, command text appended)",
+                style = mobileCallout,
+              )
+            },
+          )
+          OutlinedTextField(
+            value = kwsAckPhraseDraft,
+            onValueChange = { kwsAckPhraseDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            singleLine = true,
+            placeholder = { Text("我马上执行您的命令", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (kwsAckPhraseDraft.trim() != kwsAckPhrase) {
+                Button(
+                  onClick = { viewModel.setKwsAckPhrase(kwsAckPhraseDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.End,
+          ) {
+            OutlinedButton(
+              onClick = {
+                val title = kwsTitleDraft.trim().ifEmpty { kwsTitle }
+                val body = kwsAckPhraseDraft.trim().ifEmpty { kwsAckPhrase }
+                greetingPreviewPlayer.playText("$title，$body：示例指令")
+              },
+              shape = RoundedCornerShape(8.dp),
+              border = BorderStroke(1.dp, mobileAccent),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+            ) {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "试听" else "Preview",
+                style = mobileCallout,
+              )
+            }
+          }
+          HorizontalDivider(color = mobileBorder)
+          // ── 解析不清楚 (retry phrase) ──
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "解析不清楚" else "Retry Prompt",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "语音识别失败时播放的提示（称呼会自动加在前面）" else "Played when ASR returns no result (title prepended)",
+                style = mobileCallout,
+              )
+            },
+          )
+          OutlinedTextField(
+            value = kwsRetryPhraseDraft,
+            onValueChange = { kwsRetryPhraseDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            singleLine = true,
+            placeholder = { Text("请再说一遍你的指令", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (kwsRetryPhraseDraft.trim() != kwsRetryPhrase) {
+                Button(
+                  onClick = { viewModel.setKwsRetryPhrase(kwsRetryPhraseDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.End,
+          ) {
+            OutlinedButton(
+              onClick = {
+                val title = kwsTitleDraft.trim().ifEmpty { kwsTitle }
+                val body = kwsRetryPhraseDraft.trim().ifEmpty { kwsRetryPhrase }
+                greetingPreviewPlayer.playText("$title，$body")
+              },
+              shape = RoundedCornerShape(8.dp),
+              border = BorderStroke(1.dp, mobileAccent),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+            ) {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "试听" else "Preview",
+                style = mobileCallout,
+              )
+            }
+          }
+          HorizontalDivider(color = mobileBorder)
+          // ── 执行成功 (success phrase) ──
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "执行成功" else "Success Prompt",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "指令运行完毕时播放的提示（称呼会自动加在前面）" else "Played when agent run completes (title prepended)",
+                style = mobileCallout,
+              )
+            },
+          )
+          OutlinedTextField(
+            value = kwsSuccessPhraseDraft,
+            onValueChange = { kwsSuccessPhraseDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            singleLine = true,
+            placeholder = { Text("你的指令运行完毕", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (kwsSuccessPhraseDraft.trim() != kwsSuccessPhrase) {
+                Button(
+                  onClick = { viewModel.setKwsSuccessPhrase(kwsSuccessPhraseDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.End,
+          ) {
+            OutlinedButton(
+              onClick = {
+                val title = kwsTitleDraft.trim().ifEmpty { kwsTitle }
+                val body = kwsSuccessPhraseDraft.trim().ifEmpty { kwsSuccessPhrase }
+                greetingPreviewPlayer.playText("$title，$body")
+              },
+              shape = RoundedCornerShape(8.dp),
+              border = BorderStroke(1.dp, mobileAccent),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+            ) {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "试听" else "Preview",
+                style = mobileCallout,
+              )
+            }
+          }
+        }
+      }
+
+      // ── Voice Print ──
+      item {
+        Text(
           if (appLanguage == AppLanguage.ChineseSimplified) "声纹身份" else "VOICE PRINT",
           style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
           color = mobileAccent,
@@ -1024,6 +1357,46 @@ fun SettingsSheet(viewModel: MainViewModel) {
       }
       item {
         VoicePrintSettingsCard(viewModel = viewModel)
+      }
+
+      item {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, mobileBorder, RoundedCornerShape(14.dp))
+            .background(mobileCardSurface, RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Text(
+              if (appLanguage == AppLanguage.ChineseSimplified) "声纹匹配门槛" else "Voice Match Threshold",
+              style = mobileCallout.copy(fontWeight = FontWeight.Medium),
+              color = mobileText,
+            )
+            Text(
+              "%.2f".format(identityAsrThreshold),
+              style = mobileCallout,
+              color = mobileAccent,
+            )
+          }
+          Slider(
+            value = identityAsrThreshold,
+            onValueChange = { viewModel.setIdentityAsrThreshold(it) },
+            valueRange = 0.10f..0.80f,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          Text(
+            if (appLanguage == AppLanguage.ChineseSimplified)
+              "较低 = 更宽松 · 较高 = 更严格（默认 0.45）"
+            else
+              "Lower = more lenient · Higher = stricter (default 0.45)",
+            style = mobileCaption2,
+            color = mobileTextSecondary,
+          )
+        }
       }
 
       item { Spacer(modifier = Modifier.height(24.dp)) }

@@ -19,6 +19,8 @@ import clawberry.aiworm.cn.gateway.GatewaySession
 import clawberry.aiworm.cn.gateway.probeGatewayTlsFingerprint
 import clawberry.aiworm.cn.node.*
 import clawberry.aiworm.cn.protocol.OpenClawCanvasA2UIAction
+import clawberry.aiworm.cn.voice.KwsManager
+import clawberry.aiworm.cn.voice.KwsTtsPlayer
 import clawberry.aiworm.cn.voice.MicCaptureManager
 import clawberry.aiworm.cn.voice.TalkModeManager
 import clawberry.aiworm.cn.voice.VoiceConversationEntry
@@ -335,6 +337,37 @@ class NodeRuntime(
   private val voiceReplySpeaker: TalkModeManager
     get() = voiceReplySpeakerLazy.value
 
+  private val kwsTtsPlayer: KwsTtsPlayer by lazy {
+    KwsTtsPlayer(appContext, scope).also {
+      it.updateGreeting(prefs.kwsGreeting.value)
+      it.updateRetryPhrase("${prefs.kwsTitle.value}，${prefs.kwsRetryPhrase.value}")
+      it.updateSuccessPhrase("${prefs.kwsTitle.value}，${prefs.kwsSuccessPhrase.value}")
+      it.init()
+    }
+  }
+
+  private val kwsManager: KwsManager by lazy {
+    KwsManager(
+      context = appContext,
+      scope = scope,
+      onKeyword = { keyword ->
+        Log.i("NodeRuntime", "KWS keyword: '$keyword'")
+        if (micCapture.isPipelineActive) {
+          kwsTtsPlayer.playText("${prefs.kwsTitle.value}，我正在处理您的上一条指令，完成后即为您服务")
+          micCapture.setPendingKwsActivation()
+        } else {
+          // Start ASR only after the greeting audio finishes so the mic cannot
+          // pick up the greeting and echo it back as user speech.
+          kwsTtsPlayer.playGreeting {
+            scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+              micCapture.notifyKeyword(keyword)
+            }
+          }
+        }
+      },
+    )
+  }
+
   private val micCapture: MicCaptureManager by lazy {
     MicCaptureManager(
       context = appContext,
@@ -345,6 +378,13 @@ class NodeRuntime(
         if (prefs.useCustomAsr.value && prefs.asrUrl.value.isNotBlank()) prefs.asrUrl.value
         else ""
       },
+      // Non-empty → FunASR-ID speaker-gated backend (takes priority over asrUrl).
+      asrIdentityUserId = {
+        if (prefs.useIdentityAsr.value) prefs.instanceId.value else ""
+      },
+      asrIdentityThreshold = { prefs.identityAsrThreshold.value },
+      kws = kwsManager,
+      kwsEnabled = { prefs.kwsEnabled.value },
       sendToGateway = { message, onRunIdKnown ->
         val idempotencyKey = UUID.randomUUID().toString()
         // Notify MicCaptureManager of the idempotency key *before* the network
@@ -364,7 +404,19 @@ class NodeRuntime(
       speakAssistantReply = { text ->
         voiceReplySpeaker.speakAssistantReply(text)
       },
-    )
+      speakCommandAck = { text -> kwsTtsPlayer.playTextSuspend("${prefs.kwsTitle.value}，${prefs.kwsAckPhrase.value}：$text") },
+      speakRetry = { kwsTtsPlayer.playRetrySuspend() },
+      speakNoInput = { kwsTtsPlayer.playTextSuspend("${prefs.kwsTitle.value}，没有听到你的指令") },
+    ).also { mc ->
+      // Keep prefs.talkEnabled in sync whenever the mic's enabled state changes.
+      // This fires even when the float icon's long-press toggles the mic directly via
+      // MicCaptureManager (bypassing NodeRuntime.setMicEnabled), so the in-app voice
+      // tab UI and onStop() logic always see the correct state.
+      mc.onMicEnabledChangedHook = { enabled ->
+        prefs.setTalkEnabled(enabled)
+        externalAudioCaptureActive.value = enabled
+      }
+    }
   }
 
   val micStatusText: StateFlow<String>
@@ -703,13 +755,78 @@ class NodeRuntime(
   val useCustomAsr: StateFlow<Boolean>
     get() = prefs.useCustomAsr
 
+  val useIdentityAsr: StateFlow<Boolean>
+    get() = prefs.useIdentityAsr
+
   fun setUseCustomAsr(value: Boolean) {
     prefs.setUseCustomAsr(value)
+    if (value) prefs.setUseIdentityAsr(false)  // mutually exclusive
     // If mic is live, restart it immediately so the new backend takes effect.
     if (micCapture.micEnabled.value) {
       micCapture.setMicEnabled(false)
       micCapture.setMicEnabled(true)
     }
+  }
+
+  fun setUseIdentityAsr(value: Boolean) {
+    prefs.setUseIdentityAsr(value)
+    if (value) prefs.setUseCustomAsr(false)  // mutually exclusive
+    if (micCapture.micEnabled.value) {
+      micCapture.setMicEnabled(false)
+      micCapture.setMicEnabled(true)
+    }
+  }
+
+  fun setKwsEnabled(value: Boolean) {
+    prefs.setKwsEnabled(value)
+    if (value) micCapture.startKws() else micCapture.stopKws()
+  }
+
+  val kwsEnabled: StateFlow<Boolean>
+    get() = prefs.kwsEnabled
+
+  fun setKwsGreeting(value: String) {
+    prefs.setKwsGreeting(value)
+    kwsTtsPlayer.updateGreeting(value)
+  }
+
+  val kwsGreeting: StateFlow<String>
+    get() = prefs.kwsGreeting
+
+  fun previewKwsGreeting(text: String) {
+    kwsTtsPlayer.playText(text)
+  }
+
+  val kwsTitle: StateFlow<String>
+    get() = prefs.kwsTitle
+
+  fun setKwsTitle(value: String) {
+    prefs.setKwsTitle(value)
+    kwsTtsPlayer.updateRetryPhrase("$value，${prefs.kwsRetryPhrase.value}")
+    kwsTtsPlayer.updateSuccessPhrase("$value，${prefs.kwsSuccessPhrase.value}")
+  }
+
+  val kwsRetryPhrase: StateFlow<String>
+    get() = prefs.kwsRetryPhrase
+
+  fun setKwsRetryPhrase(value: String) {
+    prefs.setKwsRetryPhrase(value)
+    kwsTtsPlayer.updateRetryPhrase("${prefs.kwsTitle.value}，$value")
+  }
+
+  val kwsSuccessPhrase: StateFlow<String>
+    get() = prefs.kwsSuccessPhrase
+
+  fun setKwsSuccessPhrase(value: String) {
+    prefs.setKwsSuccessPhrase(value)
+    kwsTtsPlayer.updateSuccessPhrase("${prefs.kwsTitle.value}，$value")
+  }
+
+  val kwsAckPhrase: StateFlow<String>
+    get() = prefs.kwsAckPhrase
+
+  fun setKwsAckPhrase(value: String) {
+    prefs.setKwsAckPhrase(value)
   }
 
   fun setMicEnabled(value: Boolean) {

@@ -128,14 +128,94 @@ class SecurePrefs(
   )
   val useCustomAsr: StateFlow<Boolean> = _useCustomAsr
 
+  private val _useIdentityAsr = MutableStateFlow(
+    plainPrefs.getBoolean("asr.useIdentity", false)
+  )
+  val useIdentityAsr: StateFlow<Boolean> = _useIdentityAsr
+
   private val _floatingOverlayEnabled = MutableStateFlow(
     plainPrefs.getBoolean("ui.floatingOverlay", false),
   )
   val floatingOverlayEnabled: StateFlow<Boolean> = _floatingOverlayEnabled
 
+  private val _kwsEnabled = MutableStateFlow(
+    plainPrefs.getBoolean("asr.kwsEnabled", false),
+  )
+  val kwsEnabled: StateFlow<Boolean> = _kwsEnabled
+
+  fun setKwsEnabled(value: Boolean) {
+    plainPrefs.edit { putBoolean("asr.kwsEnabled", value) }
+    _kwsEnabled.value = value
+  }
+
+  private val _kwsGreeting = MutableStateFlow(
+    plainPrefs.getString("asr.kwsGreeting", "你好主人") ?: "你好主人",
+  )
+  val kwsGreeting: StateFlow<String> = _kwsGreeting
+
+  fun setKwsGreeting(value: String) {
+    plainPrefs.edit { putString("asr.kwsGreeting", value) }
+    _kwsGreeting.value = value
+  }
+
+  private val _kwsTitle = MutableStateFlow(
+    plainPrefs.getString("asr.kwsTitle", "主人") ?: "主人",
+  )
+  val kwsTitle: StateFlow<String> = _kwsTitle
+
+  fun setKwsTitle(value: String) {
+    plainPrefs.edit { putString("asr.kwsTitle", value) }
+    _kwsTitle.value = value
+  }
+
+  private val _kwsRetryPhrase = MutableStateFlow(
+    plainPrefs.getString("asr.kwsRetryPhrase", "请再说一遍你的指令") ?: "请再说一遍你的指令",
+  )
+  val kwsRetryPhrase: StateFlow<String> = _kwsRetryPhrase
+
+  fun setKwsRetryPhrase(value: String) {
+    plainPrefs.edit { putString("asr.kwsRetryPhrase", value) }
+    _kwsRetryPhrase.value = value
+  }
+
+  private val _kwsSuccessPhrase = MutableStateFlow(
+    plainPrefs.getString("asr.kwsSuccessPhrase", "你的指令运行完毕") ?: "你的指令运行完毕",
+  )
+  val kwsSuccessPhrase: StateFlow<String> = _kwsSuccessPhrase
+
+  fun setKwsSuccessPhrase(value: String) {
+    plainPrefs.edit { putString("asr.kwsSuccessPhrase", value) }
+    _kwsSuccessPhrase.value = value
+  }
+
+  private val _kwsAckPhrase = MutableStateFlow(
+    plainPrefs.getString("asr.kwsAckPhrase", "我马上执行您的命令") ?: "我马上执行您的命令",
+  )
+  val kwsAckPhrase: StateFlow<String> = _kwsAckPhrase
+
+  fun setKwsAckPhrase(value: String) {
+    plainPrefs.edit { putString("asr.kwsAckPhrase", value) }
+    _kwsAckPhrase.value = value
+  }
+
   fun setUseCustomAsr(value: Boolean) {
     plainPrefs.edit { putBoolean("asr.useCustom", value) }
     _useCustomAsr.value = value
+  }
+
+  fun setUseIdentityAsr(value: Boolean) {
+    plainPrefs.edit { putBoolean("asr.useIdentity", value) }
+    _useIdentityAsr.value = value
+  }
+
+  private val _identityAsrThreshold = MutableStateFlow(
+    plainPrefs.getFloat("asr.identityThreshold", 0.45f)
+  )
+  val identityAsrThreshold: StateFlow<Float> = _identityAsrThreshold
+
+  fun setIdentityAsrThreshold(value: Float) {
+    plainPrefs.edit { putFloat("asr.identityThreshold", value) }
+    _identityAsrThreshold.value = value
   }
 
   fun setFloatingOverlayEnabled(value: Boolean) {

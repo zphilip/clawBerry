@@ -28,6 +28,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   private val runtimeRef = MutableStateFlow<NodeRuntime?>(null)
   private var foreground = true
 
+  init {
+    // Sync globalIsRegistered from persisted prefs so the voice chip shows correct state
+    // even before the Settings tab has been opened (which would create SpeakerRegistrationManager).
+    clawberry.aiworm.cn.voice.SpeakerRegistrationManager.loadRegistrationState(app.applicationContext)
+  }
+
   private fun ensureRuntime(): NodeRuntime {
     runtimeRef.value?.let { return it }
     val runtime = nodeApp.ensureRuntime()
@@ -87,6 +93,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val appLanguage: StateFlow<AppLanguage> = prefs.appLanguage
   val asrUrl: StateFlow<String> = prefs.asrUrl
   val useCustomAsr: StateFlow<Boolean> = prefs.useCustomAsr
+  val useIdentityAsr: StateFlow<Boolean> = prefs.useIdentityAsr
+  val kwsEnabled: StateFlow<Boolean> = prefs.kwsEnabled
+  val kwsGreeting: StateFlow<String> = prefs.kwsGreeting
   val floatingOverlayEnabled: StateFlow<Boolean> = prefs.floatingOverlayEnabled
 
   val micCooldown: StateFlow<Boolean> = runtimeState(initial = false) { it.micCooldown }
@@ -217,6 +226,59 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun setUseCustomAsr(value: Boolean) {
     prefs.setUseCustomAsr(value)
     runtimeRef.value?.setUseCustomAsr(value)
+  }
+
+  fun setUseIdentityAsr(value: Boolean) {
+    prefs.setUseIdentityAsr(value)
+    runtimeRef.value?.setUseIdentityAsr(value)
+  }
+
+  fun setKwsEnabled(value: Boolean) {
+    prefs.setKwsEnabled(value)
+    runtimeRef.value?.setKwsEnabled(value)
+  }
+
+  fun setKwsGreeting(value: String) {
+    prefs.setKwsGreeting(value)
+    runtimeRef.value?.setKwsGreeting(value)
+  }
+
+  val kwsTitle: StateFlow<String> = prefs.kwsTitle
+
+  fun setKwsTitle(value: String) {
+    prefs.setKwsTitle(value)
+    runtimeRef.value?.setKwsTitle(value)
+  }
+
+  val kwsRetryPhrase: StateFlow<String> = prefs.kwsRetryPhrase
+
+  fun setKwsRetryPhrase(value: String) {
+    prefs.setKwsRetryPhrase(value)
+    runtimeRef.value?.setKwsRetryPhrase(value)
+  }
+
+  val kwsSuccessPhrase: StateFlow<String> = prefs.kwsSuccessPhrase
+
+  fun setKwsSuccessPhrase(value: String) {
+    prefs.setKwsSuccessPhrase(value)
+    runtimeRef.value?.setKwsSuccessPhrase(value)
+  }
+
+  val kwsAckPhrase: StateFlow<String> = prefs.kwsAckPhrase
+
+  fun setKwsAckPhrase(value: String) {
+    prefs.setKwsAckPhrase(value)
+    runtimeRef.value?.setKwsAckPhrase(value)
+  }
+
+  val identityAsrThreshold: StateFlow<Float> = prefs.identityAsrThreshold
+
+  fun setIdentityAsrThreshold(value: Float) {
+    prefs.setIdentityAsrThreshold(value)
+  }
+
+  fun previewKwsGreeting(text: String) {
+    runtimeRef.value?.previewKwsGreeting(text)
   }
 
   fun setFloatingOverlayEnabled(value: Boolean) {

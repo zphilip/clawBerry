@@ -43,6 +43,26 @@ class SpeakerRegistrationManager(private val context: Context) {
         const val MIN_RECORD_SEC = 3
         const val MAX_RECORD_SEC = 10
 
+        // ── Persisted registration flag ──────────────────────────────────────
+        private const val PREFS_NAME = "openclaw.node"
+        private const val PREF_REGISTERED = "asr.voicePrintRegistered"
+
+        /** Global real-time flag — set whenever the user registers or deletes their voice print. */
+        val globalIsRegistered = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+        fun loadRegistrationState(context: Context): Boolean {
+            val v = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                .getBoolean(PREF_REGISTERED, false)
+            globalIsRegistered.value = v
+            return v
+        }
+
+        fun saveRegistrationState(context: Context, registered: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean(PREF_REGISTERED, registered).apply()
+            globalIsRegistered.value = registered
+        }
+
         /** Reading prompts shown to the user while recording, by language. */
         val PROMPT_EN = listOf(
             "Please read clearly: The quick brown fox jumps over the lazy dog.",
@@ -78,6 +98,11 @@ class SpeakerRegistrationManager(private val context: Context) {
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState
+
+    init {
+        // Load persisted flag so globalIsRegistered reflects reality immediately.
+        loadRegistrationState(context)
+    }
 
     // ── Private ──────────────────────────────────────────────────────────────────────────────
     private val http = OkHttpClient.Builder()
@@ -118,6 +143,8 @@ class SpeakerRegistrationManager(private val context: Context) {
                 (0 until arr.length()).any { arr.getJSONObject(it).optString("user_id") == userId }
             }.getOrElse { false }
         }
+        // Keep the persisted flag and globalIsRegistered in sync with the server's answer.
+        saveRegistrationState(context, registered)
         _uiState.value = _uiState.value.copy(
             state = State.ReadyToRecord,
             isRegistered = registered,
@@ -185,6 +212,7 @@ class SpeakerRegistrationManager(private val context: Context) {
 
         result.fold(
             onSuccess = {
+                saveRegistrationState(context, true)
                 _uiState.value = _uiState.value.copy(
                     state = State.Registered,
                     isRegistered = true,
@@ -228,6 +256,7 @@ class SpeakerRegistrationManager(private val context: Context) {
         }
         result.fold(
             onSuccess = {
+                saveRegistrationState(context, false)
                 _uiState.value = _uiState.value.copy(
                     state = State.ReadyToRecord,
                     isRegistered = false,

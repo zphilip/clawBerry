@@ -158,7 +158,10 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
     val micInputLevel by viewModel.micInputLevel.collectAsState()
     val micIsSending by viewModel.micIsSending.collectAsState()
     val useCustomAsr by viewModel.useCustomAsr.collectAsState()
+    val useIdentityAsr by viewModel.useIdentityAsr.collectAsState()
+    val kwsEnabled by viewModel.kwsEnabled.collectAsState()
     val asrUrl by viewModel.asrUrl.collectAsState()
+    val voicePrintRegistered by clawberry.aiworm.cn.voice.SpeakerRegistrationManager.globalIsRegistered.collectAsState()
 
     var activeTab by rememberSaveable { mutableStateOf(PcTab.Connect) }
     val pcTabVoice = stringResource(R.string.common_voice)
@@ -253,6 +256,11 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                         useCustomAsr = useCustomAsr,
                         asrUrl = asrUrl,
                         onSetUseCustomAsr = viewModel::setUseCustomAsr,
+                        useIdentityAsr = useIdentityAsr,
+                        voicePrintRegistered = voicePrintRegistered,
+                        onSetUseIdentityAsr = viewModel::setUseIdentityAsr,
+                        kwsEnabled = kwsEnabled,
+                        onSetKwsEnabled = viewModel::setKwsEnabled,
                         onSetMicEnabled = viewModel::setMicEnabled,
                     )
                 PcTab.Settings -> PcSettingsTab(

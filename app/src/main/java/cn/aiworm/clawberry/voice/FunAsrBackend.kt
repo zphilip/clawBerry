@@ -139,7 +139,7 @@ class FunAsrBackend(
             AudioFormat.ENCODING_PCM_16BIT,
         )
         val r = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
             16000,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -371,7 +371,7 @@ class FunAsrBackend(
             .dispatcher(Dispatcher(taggedExecutor))
             .sslSocketFactory(sslContext.socketFactory, trustManager)
             .hostnameVerifier { _, _ -> true }
-            .connectTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(3, TimeUnit.SECONDS)   // fail fast when server is down — KWS pauses during this window
             .readTimeout(60, TimeUnit.SECONDS)
             .build()
     }

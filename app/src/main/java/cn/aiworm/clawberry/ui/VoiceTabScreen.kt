@@ -46,9 +46,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -95,7 +98,10 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
   val micInputLevel by viewModel.micInputLevel.collectAsState()
   val micIsSending by viewModel.micIsSending.collectAsState()
   val useCustomAsr by viewModel.useCustomAsr.collectAsState()
+  val useIdentityAsr by viewModel.useIdentityAsr.collectAsState()
+  val kwsEnabled by viewModel.kwsEnabled.collectAsState()
   val asrUrl by viewModel.asrUrl.collectAsState()
+  val voicePrintRegistered by clawberry.aiworm.cn.voice.SpeakerRegistrationManager.globalIsRegistered.collectAsState()
 
   // Animate the ring level here at the top composable scope for stable recomposition.
   val animatedRingLevel by animateFloatAsState(
@@ -302,11 +308,21 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
 
         // ASR backend toggle — compact vertical stack beside the mic button
         val funAsrAvailable = asrUrl.isNotBlank()
+        val builtInActive = !useCustomAsr && !useIdentityAsr
+        var asrExpanded by remember { mutableStateOf(false) }
+        // Derived label for the currently active mode (shown when collapsed)
+        val activeAsrLabel = when {
+          kwsEnabled -> "唤醒词"
+          useIdentityAsr -> if (voicePrintRegistered) "FunASR-ID" else "FunASR-ID !"
+          useCustomAsr -> if (funAsrAvailable) "FunASR" else "FunASR !"
+          else -> "Built-in"
+        }
         Column(
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           Surface(
+            onClick = { asrExpanded = !asrExpanded },
             shape = RoundedCornerShape(999.dp),
             color = mobileSurface,
             border = BorderStroke(1.dp, mobileBorder),
@@ -316,35 +332,93 @@ fun VoiceTabScreen(viewModel: MainViewModel) {
               horizontalAlignment = Alignment.CenterHorizontally,
               verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-              // Built-in chip
-              Surface(
-                onClick = { viewModel.setUseCustomAsr(false) },
-                shape = RoundedCornerShape(999.dp),
-                color = if (!useCustomAsr) mobileAccent else Color.Transparent,
+              // Collapsed: only the active chip
+              // Expanded: all chips
+              AnimatedVisibility(
+                visible = !asrExpanded,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
               ) {
+                // Active-mode summary chip (tapping the outer Surface toggles expand)
                 Text(
-                  "Built-in",
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                  activeAsrLabel,
+                  modifier = Modifier
+                    .background(mobileAccent, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
                   style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
-                  color = if (!useCustomAsr) Color.White else mobileTextSecondary,
+                  color = Color.White,
                 )
               }
-              // FunASR chip
-              Surface(
-                onClick = { viewModel.setUseCustomAsr(true) },
-                shape = RoundedCornerShape(999.dp),
-                color = if (useCustomAsr) mobileAccent else Color.Transparent,
+              AnimatedVisibility(
+                visible = asrExpanded,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
               ) {
-                Text(
-                  if (funAsrAvailable) "FunASR" else "FunASR !",
-                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                  style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
-                  color = when {
-                    useCustomAsr -> Color.White
-                    funAsrAvailable -> mobileTextSecondary
-                    else -> mobileWarning
-                  },
-                )
+                Column(
+                  horizontalAlignment = Alignment.CenterHorizontally,
+                  verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                  // Built-in chip
+                  Surface(
+                    onClick = { viewModel.setUseCustomAsr(false); asrExpanded = false },
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (builtInActive) mobileAccent else Color.Transparent,
+                  ) {
+                    Text(
+                      "Built-in",
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                      style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+                      color = if (builtInActive) Color.White else mobileTextSecondary,
+                    )
+                  }
+                  // FunASR chip
+                  Surface(
+                    onClick = { viewModel.setUseCustomAsr(true); asrExpanded = false },
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (useCustomAsr && !useIdentityAsr) mobileAccent else Color.Transparent,
+                  ) {
+                    Text(
+                      if (funAsrAvailable) "FunASR" else "FunASR !",
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                      style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+                      color = when {
+                        useCustomAsr && !useIdentityAsr -> Color.White
+                        funAsrAvailable -> mobileTextSecondary
+                        else -> mobileWarning
+                      },
+                    )
+                  }
+                  // FunASR-ID chip
+                  Surface(
+                    onClick = { if (voicePrintRegistered) { viewModel.setUseIdentityAsr(true); asrExpanded = false } },
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (useIdentityAsr) mobileAccent else Color.Transparent,
+                  ) {
+                    Text(
+                      if (voicePrintRegistered) "FunASR-ID" else "FunASR-ID !",
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                      style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+                      color = when {
+                        useIdentityAsr -> Color.White
+                        voicePrintRegistered -> mobileTextSecondary
+                        else -> mobileWarning
+                      },
+                    )
+                  }
+                  // KWS wake-word chip
+                  Surface(
+                    onClick = { viewModel.setKwsEnabled(!kwsEnabled); asrExpanded = false },
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (kwsEnabled) mobileAccent else Color.Transparent,
+                  ) {
+                    Text(
+                      "唤醒词",
+                      modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                      style = mobileCaption2.copy(fontWeight = FontWeight.SemiBold),
+                      color = if (kwsEnabled) Color.White else mobileTextSecondary,
+                    )
+                  }
+                }
               }
             }
           }

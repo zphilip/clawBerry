@@ -57,6 +57,13 @@ interface AsrBackend {
      */
     fun startListening(context: Context, callbacks: AsrCallbacks)
 
+    /**
+     * Push a chunk of 16-bit little-endian PCM audio into this backend.
+     * Called from the unified IO-thread capture loop in [MicCaptureManager].
+     * Default is a no-op so [BuiltInAsrBackend] (which manages its own mic) needs no change.
+     */
+    fun feedAudio(chunk: ShortArray, len: Int) {}
+
     /** Fully release underlying resources. Must not be called more than once. */
     fun destroy()
 }

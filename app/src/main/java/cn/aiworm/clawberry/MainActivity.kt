@@ -95,7 +95,12 @@ class MainActivity : AppCompatActivity() {
     }
     // Show the floating bubble when the user switches to another app.
     if (viewModel.floatingOverlayEnabled.value && Settings.canDrawOverlays(this)) {
-      FloatingOverlayService.start(this)
+      try {
+        FloatingOverlayService.start(this)
+      } catch (e: IllegalStateException) {
+        // Android forbids startService() once the app is in background (API 26+).
+        // This can happen in rare timing windows during onStop — silently ignore.
+      }
     }
     super.onStop()
   }

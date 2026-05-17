@@ -40,14 +40,55 @@ class MicCaptureManager(
    * Returns the FunASR WebSocket URL to use for recognition.
    * When blank/empty the built-in Android [SpeechRecognizer] is used instead.
    */
-  private val asrUrl: () -> String = { "" },
-  /**
+  private val asrUrl: () -> String = { "" },  /**
+   * Returns the user-id to use for speaker-identity-gated transcription.
+   * When non-empty, [FunAsrIdentityBackend] is used regardless of [asrUrl].
+   */
+  private val asrIdentityUserId: () -> String = { ""},  /**
+   * Similarity threshold for FunASR-ID speaker verification (0.0–1.0).
+   * Lower = more lenient, higher = stricter. Applied per-request so a settings
+   * change takes effect immediately on the next utterance.
+   */
+  private val asrIdentityThreshold: () -> Float = { FunAsrIdentityBackend.DEFAULT_THRESHOLD },  /**
+   * Optional [KwsManager] for always-on wake-word detection.
+   * When non-null and [kwsEnabled] returns true, KWS listens continuously.
+   * Detecting a keyword auto-enables the mic for one ASR session.
+   */
+  private val kws: KwsManager? = null,
+  /** Returns true when keyword spotting wake-word mode is active. */
+  private val kwsEnabled: () -> Boolean = { false },  /**
    * Send [message] to the gateway and return the run ID.
    * [onRunIdKnown] is called with the idempotency key *before* the network
    * round-trip so [pendingRunId] is set before any chat events can arrive.
    */
   private val sendToGateway: suspend (message: String, onRunIdKnown: (String) -> Unit) -> String?,
   private val speakAssistantReply: suspend (String) -> Unit = {},
+  /**
+   * Optional hook invoked (on the coroutine scope) **before** the user's recognized message
+   * is dispatched to the gateway, but only during a KWS-triggered session.
+   * Use it to play a spoken acknowledgment such as "主人，我马上执行您的命令：{text}".
+   * The hook is called with the raw recognized text; the lambda is responsible for any
+   * desired formatting. Gateway dispatch waits for the hook to return before proceeding.
+   */
+  private val speakCommandAck: (suspend (text: String) -> Unit)? = null,
+  /**
+   * Optional hook invoked when ASR returns an empty result during a KWS session —
+   * i.e. the user said something but it couldn't be recognised (identity mismatch, silence, etc.).
+   * Play a "please repeat" phrase here.  The pipeline closes normally after this hook returns.
+   */
+  private val speakRetry: (suspend () -> Unit)? = null,
+  /**
+   * Optional hook invoked when a KWS-triggered gateway run completes successfully.
+   * Play a "command done" phrase here.  The pipeline resumes (next queue item or KWS waiting)
+   * after this hook returns.
+   */
+  private val speakRunComplete: (suspend () -> Unit)? = null,
+  /**
+   * Optional hook invoked when a KWS session ends with no speech detected at all —
+   * i.e. the user said the wake word but then stayed silent until the VAD timeout.
+   * Play a "no input heard" phrase here.  The pipeline closes normally after this hook returns.
+   */
+  private val speakNoInput: (suspend () -> Unit)? = null,
 ) {
   companion object {
     private const val tag = "MicCapture"
@@ -57,6 +98,8 @@ class MicCaptureManager(
     private const val transcriptIdleFlushMs = 1_600L
     private const val maxConversationEntries = 40
     private const val pendingRunTimeoutMs = 45_000L
+    /** Shorter no-speech timeout for KWS sessions: user should speak immediately after wake word. */
+    private const val kwsSpeechTimeoutMs = 8_000L
 
     /**
      * Only one [MicCaptureManager] may hold the microphone at a time (Android's AudioRecord
@@ -130,6 +173,13 @@ class MicCaptureManager(
   private val _micEnabled = MutableStateFlow(false)
   val micEnabled: StateFlow<Boolean> = _micEnabled
 
+  /**
+   * Called whenever [setMicEnabled] changes the enabled state (but NOT from [stopForHandoff]).
+   * Registered by NodeRuntime to keep [SecurePrefs.talkEnabled] in sync so the in-app
+   * voice tab UI reflects the correct state even when the float icon triggers a direct toggle.
+   */
+  var onMicEnabledChangedHook: ((Boolean) -> Unit)? = null
+
   private val _micCooldown = MutableStateFlow(false)
   val micCooldown: StateFlow<Boolean> = _micCooldown
 
@@ -154,6 +204,23 @@ class MicCaptureManager(
   private val _isSending = MutableStateFlow(false)
   val isSending: StateFlow<Boolean> = _isSending
 
+  /**
+   * True when the ASR→gateway→TTS pipeline is active and cannot accept a new keyword
+   * activation immediately. Includes: ASR listening, waiting for gateway response, mic
+   * drain cooldown, and TTS playback.
+   */
+  val isPipelineActive: Boolean
+    get() = kwsSessionActive || _isSending.value || _micCooldown.value || _isListening.value ||
+      synchronized(ttsPauseLock) { ttsPauseDepth > 0 }
+
+  /**
+   * Queue a keyword activation that arrived while the pipeline was busy.
+   * The pipeline will auto-start a new ASR listening session once it goes idle.
+   */
+  fun setPendingKwsActivation() {
+    kwsPendingActivation = true
+  }
+
   private val messageQueue = ArrayDeque<String>()
   private val messageQueueLock = Any()
   private var flushedPartialTranscript: String? = null
@@ -166,6 +233,22 @@ class MicCaptureManager(
   private var transcriptFlushJob: Job? = null
   private var pendingRunTimeoutJob: Job? = null
   private var stopRequested = false
+  /** Set when KWS fires a keyword — mic auto-turns off again after this session ends. */
+  @Volatile private var kwsSessionActive = false
+  /** Set when a keyword fires while the pipeline is busy; cleared when pipeline goes idle. */
+  @Volatile private var kwsPendingActivation = false
+  /** True while a pending/in-flight gateway run was triggered by a KWS session. */
+  @Volatile private var pendingRunIsKws = false
+  /** True while [FunAsrIdentityBackend] is the active ASR backend (identity-gated mode). */
+  @Volatile private var usingIdentityAsr = false
+  /**
+   * Job running the post-session TTS (speakRetry / speakNoInput / speakRunComplete) launched
+   * from within a KWS or identity-ASR session.  [scheduleRestart] joins this before re-opening
+   * the KWS [AudioRecord] so the mic doesn’t capture TTS audio and corrupt the stream state.
+   */
+  private var kwsPostSessionTtsJob: Job? = null
+  /** True once [AsrCallbacks.onFinal] fires for the current session; reset at session start. */
+  @Volatile private var kwsOnFinalReceived = false
   private val ttsPauseLock = Any()
   private var ttsPauseDepth = 0
   private var resumeMicAfterTts = false
@@ -205,9 +288,52 @@ class MicCaptureManager(
     start()
   }
 
+  /**
+   * Start always-on keyword spotting. Call this after KWS is enabled in settings.
+   * No-op if KWS is not configured or [kwsEnabled] returns false.
+   */
+  fun startKws() {
+    if (kws == null || !kwsEnabled()) return
+    kws.start()
+    Log.d(tag, "KWS started")
+  }
+
+  /**
+   * Stop keyword spotting. Call when KWS is disabled in settings or the instance is destroyed.
+   */
+  fun stopKws() {
+    kws?.stop()
+    Log.d(tag, "KWS stopped")
+  }
+
+  /**
+   * Called when [KwsManager] detects a keyword.
+   * Marks this as a KWS-triggered session so the mic is automatically turned off
+   * again when the session ends (returning to keyword-waiting state).
+   */
+  fun notifyKeyword(keyword: String) {
+    Log.i(tag, "notifyKeyword: '$keyword' micEnabled=${_micEnabled.value} stopRequested=$stopRequested")
+    kwsSessionActive = true
+    val kwsJob = kws?.pause()  // cancel KWS capture coroutine; returns job to await
+    if (!_micEnabled.value) {
+      scope.launch(Dispatchers.IO) {
+        kwsJob?.join()  // wait until KWS AudioRecord is fully released in the finally block
+        mainHandler.post { setMicEnabled(true) }
+      }
+    } else {
+      // Always restart on keyword — stopRequested may be true from previous session end, ignore it
+      stop()
+      scope.launch(Dispatchers.IO) {
+        kwsJob?.join()  // wait until KWS AudioRecord is fully released in the finally block
+        mainHandler.post { start() }
+      }
+    }
+  }
+
   fun setMicEnabled(enabled: Boolean) {
     if (_micEnabled.value == enabled) return
     _micEnabled.value = enabled
+    onMicEnabledChangedHook?.invoke(enabled)
     if (enabled) {
       val pausedForTts =
         synchronized(ttsPauseLock) {
@@ -222,9 +348,23 @@ class MicCaptureManager(
         _statusText.value = if (_isSending.value) "Speaking · waiting for reply" else "Speaking…"
         return
       }
+      startKws()  // ensure KWS is running whenever mic turns on (idempotent, no-op if disabled)
+      if (kwsEnabled()) {
+        // KWS mode: don't launch ASR — stay quiet and wait for wake word.
+        // Update lastKnownMic and globalMicEnabled so the float overlay badge and
+        // toggleActiveMic() operate correctly in the "waiting for keyword" state.
+        lastKnownMic.set(this)
+        globalMicEnabled.value = true
+        _statusText.value = "Listening for wake word…"
+        return
+      }
       start()
       sendQueuedIfIdle()
     } else {
+      // Stop KWS immediately so it doesn't fire a keyword activation while the mic is
+      // explicitly off. Also clear the global state right away so the float badge updates.
+      stopKws()
+      globalMicEnabled.value = false
       // Give the recognizer time to finish processing buffered audio.
       // Cancel any prior drain to prevent duplicate sends on rapid toggle.
       drainJob?.cancel()
@@ -248,6 +388,7 @@ class MicCaptureManager(
   suspend fun pauseForTts() {
     val shouldPause = synchronized(ttsPauseLock) {
       ttsPauseDepth += 1
+      Log.d(tag, "pauseForTts: depth=$ttsPauseDepth micEnabled=${_micEnabled.value}")
       if (ttsPauseDepth > 1) return@synchronized false
       resumeMicAfterTts = _micEnabled.value
       val active = resumeMicAfterTts || backend != null || _isListening.value
@@ -275,8 +416,12 @@ class MicCaptureManager(
   /** Recreate the ASR backend after TTS playback if it was active before. */
   suspend fun resumeAfterTts() {
     val shouldResume = synchronized(ttsPauseLock) {
-      if (ttsPauseDepth == 0) return@synchronized false
+      if (ttsPauseDepth == 0) {
+        Log.w(tag, "resumeAfterTts: depth already 0 — unbalanced call?")
+        return@synchronized false
+      }
       ttsPauseDepth -= 1
+      Log.d(tag, "resumeAfterTts: depth=$ttsPauseDepth resumeMicAfterTts=$resumeMicAfterTts micEnabled=${_micEnabled.value}")
       if (ttsPauseDepth > 0) return@synchronized false
       val resume = resumeMicAfterTts && _micEnabled.value
       resumeMicAfterTts = false
@@ -285,7 +430,15 @@ class MicCaptureManager(
       }
       resume
     }
-    if (!shouldResume) return
+    if (!shouldResume) {
+      // In KWS mode the mic was off, so normal resume is skipped. Activate any queued
+      // keyword session now that TTS has finished playing (NodeRuntime path).
+      if (kwsPendingActivation && kwsEnabled()) {
+        kwsPendingActivation = false
+        activatePendingKwsSession()
+      }
+      return
+    }
     stopRequested = false
     start()
     sendQueuedIfIdle()
@@ -408,7 +561,8 @@ class MicCaptureManager(
   private fun start() {
     stopRequested = false
     val url = asrUrl().trim()
-    val useBuiltIn = url.isEmpty()
+    val identityUserIdForStart = asrIdentityUserId().trim()
+    val useBuiltIn = url.isEmpty() && identityUserIdForStart.isEmpty()
     if (useBuiltIn && !BuiltInAsrBackend.isAvailable(context)) {
       _statusText.value = "Speech recognizer unavailable"
       _micEnabled.value = false
@@ -435,10 +589,18 @@ class MicCaptureManager(
     mainHandler.post {
       try {
         if (backend == null) {
-          backend = if (useBuiltIn) {
-            BuiltInAsrBackend(speechMinSessionMs, speechCompleteSilenceMs, speechPossibleSilenceMs)
-          } else {
-            FunAsrBackend(url, scope)
+          val identityUserId = asrIdentityUserId().trim()
+          usingIdentityAsr = identityUserId.isNotEmpty()
+          backend = when {
+            identityUserId.isNotEmpty() -> FunAsrIdentityBackend(
+              identityUserId, scope, asrIdentityThreshold,
+              // KWS sessions: shorter timeout so the user doesn't wait 20s after
+              // saying the wake word and then going silent.
+              speechTimeoutMs = if (kwsSessionActive) kwsSpeechTimeoutMs
+                                else FunAsrIdentityBackend.SPEECH_TIMEOUT_MS,
+            )
+            !useBuiltIn -> FunAsrBackend(url, scope)
+            else -> BuiltInAsrBackend(speechMinSessionMs, speechCompleteSilenceMs, speechPossibleSilenceMs)
           }
         }
         startListeningSession()
@@ -486,13 +648,18 @@ class MicCaptureManager(
   }
 
   private fun startListeningSession() {
-    val b = backend ?: return
+    val b = backend ?: run {
+      Log.w(tag, "startListeningSession: backend is null — skipping (stopRequested=$stopRequested micEnabled=${_micEnabled.value})")
+      return
+    }
+    Log.d(tag, "startListeningSession: backend=${b::class.simpleName}")
     _statusText.value =
       when {
         _isSending.value -> "${listeningLabel()} · sending queued voice"
         messageQueue.isNotEmpty() -> "${listeningLabel()} · ${messageQueue.size} queued"
         else -> listeningLabel()
       }
+    kwsOnFinalReceived = false  // reset per session; set true by onFinal before onEndOfSpeech
     _isListening.value = true
     b.startListening(context, asrCallbacks)
   }
@@ -500,6 +667,7 @@ class MicCaptureManager(
   /** Returns a "Listening · <Backend>" label reflecting the active ASR backend. */
   private fun listeningLabel(): String {
     val suffix = when (backend) {
+      is FunAsrIdentityBackend -> "FunASR-ID"
       is FunAsrBackend -> "FunASR"
       is BuiltInAsrBackend -> "Built-in ASR"
       else -> null
@@ -508,14 +676,53 @@ class MicCaptureManager(
   }
 
   private fun scheduleRestart(delayMs: Long = 300L) {
-    if (stopRequested) return
-    if (!_micEnabled.value) return
+    if (stopRequested) {
+      Log.d(tag, "scheduleRestart skipped: stopRequested=true")
+      return
+    }
+    if (!_micEnabled.value) {
+      Log.d(tag, "scheduleRestart skipped: micEnabled=false")
+      return
+    }
+    // KWS mode: don't auto-restart — stop the backend and wait for next wake word.
+    // This applies whether the mic was manually on or keyword-triggered.
+    if (kwsEnabled()) {
+      kwsSessionActive = false
+      Log.d(tag, "scheduleRestart: KWS mode — session ended, waiting for wake word")
+      stop()  // clears micOwner — globalMicEnabled drops to false inside onOwnerChanged(null)
+      // Re-assert globalMicEnabled and lastKnownMic since we’re back in KWS waiting state.
+      // Without this, the float badge would incorrectly show mic as "off" until next keyword.
+      lastKnownMic.set(this)
+      globalMicEnabled.value = true
+      _statusText.value = "Listening for wake word…"
+      // Delay before re-opening KWS AudioRecord: lets Android audio routing fully settle
+      // after the ASR AudioRecord closes. Without this, the new AudioRecord may open while
+      // the previous audio session is still being torn down, resulting in attenuated capture.
+      // Also join any in-flight post-session TTS (retry prompt) so the KWS mic doesn't
+      // capture TTS audio and corrupt the keyword-spotter stream state.
+      val kwsRef = kws
+      val ttsJob = kwsPostSessionTtsJob.also { kwsPostSessionTtsJob = null }
+      scope.launch(Dispatchers.IO) {
+        ttsJob?.join()  // wait for retry/success audio to finish before opening the mic
+        delay(400L)
+        kwsRef?.resume()
+      }
+      return
+    }
+    Log.d(tag, "scheduleRestart in ${delayMs}ms")
     restartJob?.cancel()
     restartJob =
       scope.launch {
         delay(delayMs)
         mainHandler.post {
-          if (stopRequested || !_micEnabled.value) return@post
+          if (stopRequested) {
+            Log.d(tag, "scheduleRestart post: skipped — stopRequested=true")
+            return@post
+          }
+          if (!_micEnabled.value) {
+            Log.d(tag, "scheduleRestart post: skipped — micEnabled=false")
+            return@post
+          }
           try {
             startListeningSession()
           } catch (_: Throwable) {
@@ -528,7 +735,18 @@ class MicCaptureManager(
   private fun queueRecognizedMessage(text: String) {
     val message = text.trim()
     _liveTranscript.value = null
-    if (message.isEmpty()) return
+    if (message.isEmpty()) {
+      // Play retry prompt when:
+      //  • KWS session: empty = recognition failed after wake word
+      //  • Identity ASR: empty = server actively rejected the speaker (identity mismatch)
+      if (kwsSessionActive || usingIdentityAsr) {
+        kwsPostSessionTtsJob = scope.launch {
+          try { speakRetry?.invoke() }
+          catch (e: Throwable) { Log.w(tag, "speakRetry failed: ${e.message}") }
+        }
+      }
+      return
+    }
     appendConversation(
       role = VoiceConversationRole.User,
       text = message,
@@ -571,13 +789,21 @@ class MicCaptureManager(
     }
 
     val next = firstQueuedMessage() ?: return
+    val isKwsSession = kwsSessionActive  // capture before scope.launch — onEndOfSpeech may clear it
     _isSending.value = true
+    if (isKwsSession) pendingRunIsKws = true
     pendingRunTimeoutJob?.cancel()
     pendingRunTimeoutJob = null
     _statusText.value = if (_micEnabled.value) "Listening · sending queued voice" else "Sending queued voice"
 
     scope.launch {
       try {
+        // During a KWS-triggered session, play a spoken acknowledgment before dispatching
+        // to the gateway.  The hook suspends until TTS is done so the user hears the ack
+        // before the AI reply starts.
+        if (isKwsSession) {
+          speakCommandAck?.invoke(next)
+        }
         val runId = sendToGateway(next) { earlyRunId ->
           // Called with the idempotency key before chat.send fires so that
           // pendingRunId is populated before any chat events can arrive.
@@ -672,6 +898,14 @@ class MicCaptureManager(
     pendingAssistantEntryId = null
     _isSending.value = false
     if (_micEnabled.value) _statusText.value = listeningLabel()
+    val wasKws = pendingRunIsKws
+    pendingRunIsKws = false
+    if (wasKws) {
+      scope.launch {
+        try { speakRunComplete?.invoke() }
+        catch (e: Throwable) { Log.w(tag, "speakRunComplete (external) failed: ${e.message}") }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -687,7 +921,37 @@ class MicCaptureManager(
     pendingAltRunId = null
     pendingAssistantEntryId = null
     _isSending.value = false
-    sendQueuedIfIdle()
+    val wasKws = pendingRunIsKws
+    pendingRunIsKws = false
+    if (wasKws) {
+      scope.launch {
+        try { speakRunComplete?.invoke() }
+        catch (e: Throwable) { Log.w(tag, "speakRunComplete failed: ${e.message}") }
+      }
+    }
+    // Activate a queued keyword session when no TTS is currently playing (Zero/PicoClaw path).
+    // When TTS IS active (NodeRuntime), resumeAfterTts() handles it once TTS finishes.
+    if (kwsPendingActivation && kwsEnabled() && synchronized(ttsPauseLock) { ttsPauseDepth == 0 }) {
+      kwsPendingActivation = false
+      activatePendingKwsSession()
+    } else {
+      sendQueuedIfIdle()
+    }
+  }
+
+  /**
+   * Start an ASR session for a keyword activation that was queued while the pipeline was busy.
+   * Bypasses the normal KWS "wait for wake word" gate in [setMicEnabled] so ASR starts immediately.
+   */
+  private fun activatePendingKwsSession() {
+    Log.i(tag, "activatePendingKwsSession: starting queued KWS session")
+    val kwsJob = kws?.pause()  // cancel KWS capture coroutine; returns job to await
+    kwsSessionActive = true
+    _micEnabled.value = true
+    scope.launch(Dispatchers.IO) {
+      kwsJob?.join()  // wait until KWS AudioRecord is fully released before opening a new one
+      mainHandler.post { start() }
+    }
   }
 
   private fun queuedWaitingStatus(): String {
@@ -812,6 +1076,7 @@ class MicCaptureManager(
       }
 
       override fun onFinal(text: String) {
+        kwsOnFinalReceived = true  // mark that the backend did produce a result (even if empty)
         transcriptFlushJob?.cancel()
         transcriptFlushJob = null
         if (text != flushedPartialTranscript) {
@@ -836,7 +1101,16 @@ class MicCaptureManager(
       }
 
       override fun onEndOfSpeech() {
+        Log.d(tag, "onEndOfSpeech: stopRequested=$stopRequested micEnabled=${_micEnabled.value} backend=${backend?.let { it::class.simpleName }}")
         _inputLevel.value = 0f
+        // KWS session ended with no speech at all (VAD timeout, user said nothing after
+        // the wake word) — play "no input heard" prompt before resuming KWS listening.
+        if (kwsSessionActive && !kwsOnFinalReceived && speakNoInput != null) {
+          kwsPostSessionTtsJob = scope.launch {
+            try { speakNoInput.invoke() }
+            catch (e: Throwable) { Log.w(tag, "speakNoInput failed: ${e.message}") }
+          }
+        }
         scheduleRestart()
       }
     }

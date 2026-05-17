@@ -16,6 +16,8 @@ import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import clawberry.aiworm.cn.voice.KwsManager
+import clawberry.aiworm.cn.voice.KwsTtsPlayer
 import clawberry.aiworm.cn.voice.MicCaptureManager
 import clawberry.aiworm.cn.voice.VoiceConversationEntry
 
@@ -95,6 +97,42 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
   private val _useCustomAsr = MutableStateFlow(asrPrefs.getBoolean("asr.useCustom", false))
   val useCustomAsr: StateFlow<Boolean> = _useCustomAsr.asStateFlow()
+  private val _useIdentityAsr = MutableStateFlow(asrPrefs.getBoolean("asr.useIdentity", false))
+  val useIdentityAsr: StateFlow<Boolean> = _useIdentityAsr.asStateFlow()
+
+  private val _kwsEnabled = MutableStateFlow(asrPrefs.getBoolean("asr.kwsEnabled", false))
+  val kwsEnabled: StateFlow<Boolean> = _kwsEnabled.asStateFlow()
+
+  private val _kwsGreeting = MutableStateFlow(
+    asrPrefs.getString("asr.kwsGreeting", "你好主人") ?: "你好主人",
+  )
+  val kwsGreeting: StateFlow<String> = _kwsGreeting.asStateFlow()
+
+  private val _kwsTitle = MutableStateFlow(
+    asrPrefs.getString("asr.kwsTitle", "主人") ?: "主人",
+  )
+  val kwsTitle: StateFlow<String> = _kwsTitle.asStateFlow()
+
+  private val _kwsRetryPhrase = MutableStateFlow(
+    asrPrefs.getString("asr.kwsRetryPhrase", "请再说一遍你的指令") ?: "请再说一遍你的指令",
+  )
+  val kwsRetryPhrase: StateFlow<String> = _kwsRetryPhrase.asStateFlow()
+
+  private val _kwsSuccessPhrase = MutableStateFlow(
+    asrPrefs.getString("asr.kwsSuccessPhrase", "你的指令运行完毕") ?: "你的指令运行完毕",
+  )
+  val kwsSuccessPhrase: StateFlow<String> = _kwsSuccessPhrase.asStateFlow()
+
+  private val _kwsAckPhrase = MutableStateFlow(
+    asrPrefs.getString("asr.kwsAckPhrase", "我马上执行您的命令") ?: "我马上执行您的命令",
+  )
+  val kwsAckPhrase: StateFlow<String> = _kwsAckPhrase.asStateFlow()
+
+  init {
+    // Sync globalIsRegistered from persisted prefs so voice chip shows correct state
+    // even before the user opens the Settings tab (which creates SpeakerRegistrationManager).
+    clawberry.aiworm.cn.voice.SpeakerRegistrationManager.loadRegistrationState(app.applicationContext)
+  }
 
   private val _token = MutableStateFlow<String?>(prefs.getString("token", null))
   val token: StateFlow<String?> = _token.asStateFlow()
@@ -113,18 +151,52 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   val sessionPicker: StateFlow<ZcSessionPickerState> = _sessionPicker.asStateFlow()
 
   // --- Voice (always-listening mic) ---
+  private val kwsTtsPlayer = KwsTtsPlayer(app.applicationContext, viewModelScope).also {
+    it.updateGreeting(_kwsGreeting.value)
+    it.updateRetryPhrase("${_kwsTitle.value}，${_kwsRetryPhrase.value}")
+    it.updateSuccessPhrase("${_kwsTitle.value}，${_kwsSuccessPhrase.value}")
+    it.init()
+  }
   private val mic: MicCaptureManager = MicCaptureManager(
     context = app.applicationContext,
     scope = viewModelScope,
     asrUrl = {
       if (_useCustomAsr.value && _asrUrl.value.isNotBlank()) _asrUrl.value else ""
     },
+    asrIdentityUserId = {
+      if (_useIdentityAsr.value) asrPrefs.getString("node.instanceId", "") ?: "" else ""
+    },
+    asrIdentityThreshold = { asrPrefs.getFloat("asr.identityThreshold", 0.45f) },
+    kws = KwsManager(
+      context = app.applicationContext,
+      scope = viewModelScope,
+      onKeyword = { keyword ->
+        android.util.Log.i("ZeroClawVM", "KWS keyword: '$keyword'")
+        if (mic.isPipelineActive) {
+          kwsTtsPlayer.playText("${_kwsTitle.value}，我正在处理您的上一条指令，完成后即为您服务")
+          mic.setPendingKwsActivation()
+        } else {
+          // Start ASR only after the greeting audio finishes so the mic cannot
+          // pick up the greeting and echo it back as user speech.
+          kwsTtsPlayer.playGreeting {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+              mic.notifyKeyword(keyword)
+            }
+          }
+        }
+      },
+    ),
+    kwsEnabled = { _kwsEnabled.value },
     sendToGateway = { message, onRunIdKnown ->
       onRunIdKnown(UUID.randomUUID().toString())
       sendMessage(message)
       null  // no runId tracking — responses come via onExternalAssistant*
     },
     speakAssistantReply = {},   // no TTS for Zero/Pico voice tab
+    speakCommandAck = { text -> kwsTtsPlayer.playTextSuspend("${_kwsTitle.value}，${_kwsAckPhrase.value}：$text") },
+    speakRetry = { kwsTtsPlayer.playRetrySuspend() },
+    speakRunComplete = { kwsTtsPlayer.playSuccessSuspend() },
+    speakNoInput = { kwsTtsPlayer.playTextSuspend("${_kwsTitle.value}，没有听到你的指令") },
   )
 
   val micEnabled: StateFlow<Boolean> = mic.micEnabled
@@ -141,7 +213,61 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   fun setUseCustomAsr(value: Boolean) {
     asrPrefs.edit().putBoolean("asr.useCustom", value).apply()
     _useCustomAsr.value = value
+    if (value) {
+      asrPrefs.edit().putBoolean("asr.useIdentity", false).apply()
+      _useIdentityAsr.value = false
+    }
     mic.switchAsr()  // restart backend to pick up the new ASR type
+  }
+
+  fun setUseIdentityAsr() {
+    asrPrefs.edit()
+      .putBoolean("asr.useIdentity", true)
+      .putBoolean("asr.useCustom", false)
+      .apply()
+    _useIdentityAsr.value = true
+    _useCustomAsr.value = false
+    mic.switchAsr()
+  }
+
+  fun setKwsEnabled(value: Boolean) {
+    asrPrefs.edit().putBoolean("asr.kwsEnabled", value).apply()
+    _kwsEnabled.value = value
+    if (value) mic.startKws() else mic.stopKws()
+  }
+
+  fun setKwsGreeting(value: String) {
+    asrPrefs.edit().putString("asr.kwsGreeting", value).apply()
+    _kwsGreeting.value = value
+    kwsTtsPlayer.updateGreeting(value)
+  }
+
+  fun previewKwsGreeting(text: String) {
+    kwsTtsPlayer.playText(text)
+  }
+
+  fun setKwsTitle(value: String) {
+    asrPrefs.edit().putString("asr.kwsTitle", value).apply()
+    _kwsTitle.value = value
+    kwsTtsPlayer.updateRetryPhrase("$value，${_kwsRetryPhrase.value}")
+    kwsTtsPlayer.updateSuccessPhrase("$value，${_kwsSuccessPhrase.value}")
+  }
+
+  fun setKwsRetryPhrase(value: String) {
+    asrPrefs.edit().putString("asr.kwsRetryPhrase", value).apply()
+    _kwsRetryPhrase.value = value
+    kwsTtsPlayer.updateRetryPhrase("${_kwsTitle.value}，$value")
+  }
+
+  fun setKwsSuccessPhrase(value: String) {
+    asrPrefs.edit().putString("asr.kwsSuccessPhrase", value).apply()
+    _kwsSuccessPhrase.value = value
+    kwsTtsPlayer.updateSuccessPhrase("${_kwsTitle.value}，$value")
+  }
+
+  fun setKwsAckPhrase(value: String) {
+    asrPrefs.edit().putString("asr.kwsAckPhrase", value).apply()
+    _kwsAckPhrase.value = value
   }
 
   // --- Internal ---
@@ -540,6 +666,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     reconnectJob?.cancel()
     webSocket?.cancel()
     webSocket = null
+    kwsTtsPlayer.release()
   }
 
   // ---------------------------------------------------------------------------

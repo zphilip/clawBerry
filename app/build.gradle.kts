@@ -214,6 +214,11 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")
     testImplementation("org.robolectric:robolectric:4.16.1")
     testRuntimeOnly("org.junit.vintage:junit-vintage-engine:6.0.2")
+
+    // Sherpa-ONNX — on-device keyword spotting (wake word)
+    // AAR downloaded from: https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.1/sherpa-onnx-1.13.1.aar
+    // Place the file at app/libs/sherpa-onnx-1.13.1.aar
+    implementation(files("libs/sherpa-onnx-1.13.1.aar"))
 }
 
 tasks.withType<Test>().configureEach {
