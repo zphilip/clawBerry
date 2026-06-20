@@ -23,6 +23,7 @@ import clawberry.aiworm.cn.voice.KwsManager
 import clawberry.aiworm.cn.voice.KwsTtsPlayer
 import clawberry.aiworm.cn.voice.MicCaptureManager
 import clawberry.aiworm.cn.voice.TalkModeManager
+import clawberry.aiworm.cn.voice.TtsModel
 import clawberry.aiworm.cn.voice.VoiceConversationEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -337,14 +338,22 @@ class NodeRuntime(
   private val voiceReplySpeaker: TalkModeManager
     get() = voiceReplySpeakerLazy.value
 
-  private val kwsTtsPlayer: KwsTtsPlayer by lazy {
-    KwsTtsPlayer(appContext, scope).also {
+  @Volatile private var _kwsTtsPlayer: KwsTtsPlayer? = null
+
+  private val kwsTtsPlayer: KwsTtsPlayer
+    get() = _kwsTtsPlayer ?: synchronized(this) {
+      _kwsTtsPlayer ?: createKwsTtsPlayer().also { _kwsTtsPlayer = it }
+    }
+
+  private fun createKwsTtsPlayer(): KwsTtsPlayer =
+    KwsTtsPlayer(appContext, scope, prefs.ttsModel.value, prefs.ttsSpeakerId.value).also {
       it.updateGreeting(prefs.kwsGreeting.value)
       it.updateRetryPhrase("${prefs.kwsTitle.value}，${prefs.kwsRetryPhrase.value}")
       it.updateSuccessPhrase("${prefs.kwsTitle.value}，${prefs.kwsSuccessPhrase.value}")
+      it.updateThinkingPhrase(prefs.voiceThinkingPhrase.value)
+      it.updateToolCallsPhrase(prefs.voiceToolCallsPhrase.value)
       it.init()
     }
-  }
 
   private val kwsManager: KwsManager by lazy {
     KwsManager(
@@ -390,10 +399,12 @@ class NodeRuntime(
         // Notify MicCaptureManager of the idempotency key *before* the network
         // call so pendingRunId is set before any chat events can arrive.
         onRunIdKnown(idempotencyKey)
+        val hint = prefs.voiceTtsHint.value.trim()
+        val effectiveMessage = if (hint.isNotEmpty()) "$message\n\n$hint" else message
         val params =
           buildJsonObject {
             put("sessionKey", JsonPrimitive(resolveMainSessionKey()))
-            put("message", JsonPrimitive(message))
+            put("message", JsonPrimitive(effectiveMessage))
             put("thinking", JsonPrimitive(chatThinkingLevel.value))
             put("timeoutMs", JsonPrimitive(30_000))
             put("idempotencyKey", JsonPrimitive(idempotencyKey))
@@ -827,6 +838,55 @@ class NodeRuntime(
 
   fun setKwsAckPhrase(value: String) {
     prefs.setKwsAckPhrase(value)
+  }
+
+  val voiceThinkingPhrase: StateFlow<String>
+    get() = prefs.voiceThinkingPhrase
+
+  val voiceThinkingEnabled: StateFlow<Boolean>
+    get() = prefs.voiceThinkingEnabled
+
+  fun setVoiceThinkingEnabled(value: Boolean) {
+    prefs.setVoiceThinkingEnabled(value)
+  }
+
+  fun setVoiceThinkingPhrase(value: String) {
+    prefs.setVoiceThinkingPhrase(value)
+    kwsTtsPlayer.updateThinkingPhrase(value)
+  }
+
+  val voiceToolCallsPhrase: StateFlow<String>
+    get() = prefs.voiceToolCallsPhrase
+
+  val voiceToolCallsEnabled: StateFlow<Boolean>
+    get() = prefs.voiceToolCallsEnabled
+
+  fun setVoiceToolCallsEnabled(value: Boolean) {
+    prefs.setVoiceToolCallsEnabled(value)
+  }
+
+  fun setVoiceToolCallsPhrase(value: String) {
+    prefs.setVoiceToolCallsPhrase(value)
+    kwsTtsPlayer.updateToolCallsPhrase(value)
+  }
+
+  val voiceTtsHint: StateFlow<String>
+    get() = prefs.voiceTtsHint
+
+  fun setVoiceTtsHint(value: String) {
+    prefs.setVoiceTtsHint(value)
+  }
+
+  fun setTtsModel(model: TtsModel) {
+    prefs.setTtsModel(model)
+    _kwsTtsPlayer?.release()
+    _kwsTtsPlayer = null
+  }
+
+  fun setTtsSpeakerId(id: Int) {
+    prefs.setTtsSpeakerId(id)
+    _kwsTtsPlayer?.release()
+    _kwsTtsPlayer = null
   }
 
   fun setMicEnabled(value: Boolean) {

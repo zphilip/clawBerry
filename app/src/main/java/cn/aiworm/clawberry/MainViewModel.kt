@@ -12,6 +12,7 @@ import clawberry.aiworm.cn.gateway.GatewayEndpoint
 import clawberry.aiworm.cn.node.CameraCaptureManager
 import clawberry.aiworm.cn.node.CanvasController
 import clawberry.aiworm.cn.node.SmsManager
+import clawberry.aiworm.cn.voice.TtsModel
 import clawberry.aiworm.cn.voice.VoiceConversationEntry
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -269,6 +270,55 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun setKwsAckPhrase(value: String) {
     prefs.setKwsAckPhrase(value)
     runtimeRef.value?.setKwsAckPhrase(value)
+  }
+
+  val voiceThinkingPhrase: StateFlow<String> = prefs.voiceThinkingPhrase
+
+  val voiceThinkingEnabled: StateFlow<Boolean> = prefs.voiceThinkingEnabled
+
+  fun setVoiceThinkingEnabled(value: Boolean) {
+    prefs.setVoiceThinkingEnabled(value)
+    runtimeRef.value?.setVoiceThinkingEnabled(value)
+  }
+
+  fun setVoiceThinkingPhrase(value: String) {
+    prefs.setVoiceThinkingPhrase(value)
+    runtimeRef.value?.setVoiceThinkingPhrase(value)
+  }
+
+  val voiceToolCallsPhrase: StateFlow<String> = prefs.voiceToolCallsPhrase
+
+  val voiceToolCallsEnabled: StateFlow<Boolean> = prefs.voiceToolCallsEnabled
+
+  fun setVoiceToolCallsEnabled(value: Boolean) {
+    prefs.setVoiceToolCallsEnabled(value)
+    runtimeRef.value?.setVoiceToolCallsEnabled(value)
+  }
+
+  fun setVoiceToolCallsPhrase(value: String) {
+    prefs.setVoiceToolCallsPhrase(value)
+    runtimeRef.value?.setVoiceToolCallsPhrase(value)
+  }
+
+  val voiceTtsHint: StateFlow<String> = prefs.voiceTtsHint
+
+  fun setVoiceTtsHint(value: String) {
+    prefs.setVoiceTtsHint(value)
+    runtimeRef.value?.setVoiceTtsHint(value)
+  }
+
+  val ttsModel: StateFlow<TtsModel> = prefs.ttsModel
+
+  fun setTtsModel(value: TtsModel) {
+    prefs.setTtsModel(value)
+    runtimeRef.value?.setTtsModel(value)
+  }
+
+  val ttsSpeakerId: StateFlow<Int> = prefs.ttsSpeakerId
+
+  fun setTtsSpeakerId(value: Int) {
+    prefs.setTtsSpeakerId(value)
+    runtimeRef.value?.setTtsSpeakerId(value)
   }
 
   val identityAsrThreshold: StateFlow<Float> = prefs.identityAsrThreshold

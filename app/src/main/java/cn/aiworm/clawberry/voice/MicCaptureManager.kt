@@ -218,6 +218,7 @@ class MicCaptureManager(
    * The pipeline will auto-start a new ASR listening session once it goes idle.
    */
   fun setPendingKwsActivation() {
+    Log.d(tag, "setPendingKwsActivation → kwsPendingActivation=true")
     kwsPendingActivation = true
   }
 
@@ -237,6 +238,21 @@ class MicCaptureManager(
   @Volatile private var kwsSessionActive = false
   /** Set when a keyword fires while the pipeline is busy; cleared when pipeline goes idle. */
   @Volatile private var kwsPendingActivation = false
+  /**
+   * Set by [scheduleRestart] in KWS mode instead of immediately resuming KWS.
+   * KWS resume is deferred until all response audio (speakCommandAck, voice prompts,
+   * proxy TTS, speakRunComplete) has finished, so the keyword spotter cannot capture
+   * TTS audio played through the device speaker and false-trigger.
+   * Cleared when KWS is actually resumed.
+   */
+  @Volatile private var kwsResumePending = false
+  /**
+   * Set by [onExternalAssistantComplete] / [completePendingTurn] when a KWS-triggered
+   * run completes and the success phrase ("主人，你的指令运行完毕") needs to be played.
+   * The phrase is deferred so it can be played *before* KWS is resumed, avoiding the
+   * same audio-capture false-trigger described above.
+   */
+  @Volatile private var pendingSpeakRunComplete = false
   /** True while a pending/in-flight gateway run was triggered by a KWS session. */
   @Volatile private var pendingRunIsKws = false
   /** True while [FunAsrIdentityBackend] is the active ASR backend (identity-gated mode). */
@@ -294,6 +310,14 @@ class MicCaptureManager(
    */
   fun startKws() {
     if (kws == null || !kwsEnabled()) return
+    if (isPipelineActive) {
+      // Pipeline is busy — defer KWS start to avoid capturing speaker audio
+      // through the keyword-spotter microphone and false-triggering "小爪".
+      Log.d(tag, "startKws: pipeline active — deferring KWS start")
+      kwsResumePending = true
+      return
+    }
+    Log.d(tag, "startKws called")
     kws.start()
     Log.d(tag, "KWS started")
   }
@@ -312,7 +336,7 @@ class MicCaptureManager(
    * again when the session ends (returning to keyword-waiting state).
    */
   fun notifyKeyword(keyword: String) {
-    Log.i(tag, "notifyKeyword: '$keyword' micEnabled=${_micEnabled.value} stopRequested=$stopRequested")
+    Log.i(tag, "notifyKeyword: '$keyword' micEnabled=${_micEnabled.value}")
     kwsSessionActive = true
     val kwsJob = kws?.pause()  // cancel KWS capture coroutine; returns job to await
     if (!_micEnabled.value) {
@@ -348,16 +372,25 @@ class MicCaptureManager(
         _statusText.value = if (_isSending.value) "Speaking · waiting for reply" else "Speaking…"
         return
       }
-      startKws()  // ensure KWS is running whenever mic turns on (idempotent, no-op if disabled)
       if (kwsEnabled()) {
         // KWS mode: don't launch ASR — stay quiet and wait for wake word.
         // Update lastKnownMic and globalMicEnabled so the float overlay badge and
         // toggleActiveMic() operate correctly in the "waiting for keyword" state.
         lastKnownMic.set(this)
         globalMicEnabled.value = true
+        // If the pipeline is currently active (e.g. TTS playing or gateway
+        // request in-flight), defer KWS start.  Otherwise the KWS AudioRecord
+        // would capture speaker audio and the keyword spotter would false-trigger
+        // "小爪", leading to spurious busy-message / retry / no-input prompts.
+        if (isPipelineActive) {
+          kwsResumePending = true
+        } else {
+          startKws()
+        }
         _statusText.value = "Listening for wake word…"
         return
       }
+      startKws()  // non-KWS mode: no-op (kwsEnabled()=false → returns immediately)
       start()
       sendQueuedIfIdle()
     } else {
@@ -388,7 +421,7 @@ class MicCaptureManager(
   suspend fun pauseForTts() {
     val shouldPause = synchronized(ttsPauseLock) {
       ttsPauseDepth += 1
-      Log.d(tag, "pauseForTts: depth=$ttsPauseDepth micEnabled=${_micEnabled.value}")
+      Log.d(tag, "pauseForTts: depth=$ttsPauseDepth micEnabled=${_micEnabled.value} kwsSessionActive=$kwsSessionActive kwsEnabled=${kwsEnabled()} backend=${backend?.let { it::class.simpleName } ?: "null"}")
       if (ttsPauseDepth > 1) return@synchronized false
       resumeMicAfterTts = _micEnabled.value
       val active = resumeMicAfterTts || backend != null || _isListening.value
@@ -406,6 +439,13 @@ class MicCaptureManager(
       _statusText.value = if (_isSending.value) "Speaking · waiting for reply" else "Speaking…"
       true
     }
+    // On the first pause (depth 0→1), also pause KWS so the keyword spotter
+    // doesn't capture TTS audio played through the device speaker.  Without this,
+    // TTS phonemes can false-trigger the wake-word model and queue a spurious
+    // KWS activation that fires after TTS finishes.
+    if (kwsEnabled() && ttsPauseDepth == 1) {
+      kws?.pause()
+    }
     if (!shouldPause) return
     withContext(Dispatchers.Main) {
       backend?.destroy()
@@ -421,7 +461,7 @@ class MicCaptureManager(
         return@synchronized false
       }
       ttsPauseDepth -= 1
-      Log.d(tag, "resumeAfterTts: depth=$ttsPauseDepth resumeMicAfterTts=$resumeMicAfterTts micEnabled=${_micEnabled.value}")
+      Log.d(tag, "resumeAfterTts: depth=$ttsPauseDepth resumeMicAfterTts=$resumeMicAfterTts micEnabled=${_micEnabled.value} kwsSessionActive=$kwsSessionActive kwsEnabled=${kwsEnabled()}")
       if (ttsPauseDepth > 0) return@synchronized false
       val resume = resumeMicAfterTts && _micEnabled.value
       resumeMicAfterTts = false
@@ -430,15 +470,43 @@ class MicCaptureManager(
       }
       resume
     }
+    // ── KWS mode (outermost resume only) ──────────────────────────────────
+    // In KWS mode each interaction is a discrete "wake → speak → respond"
+    // cycle.  After TTS finishes the system must return to waiting for the
+    // next wake word — it must NOT create a new ASR backend that would listen
+    // indefinitely and eventually fire onFinal("") / onEndOfSpeech, which
+    // would trigger a spurious retry ("请再说一遍你的指令") or no-input prompt.
+    if (kwsEnabled() && ttsPauseDepth == 0) {
+      // Process any KWS activation that was queued during TTS playback first —
+      // activatePendingKwsSession() pauses KWS and starts ASR, so KWS resume
+      // is not needed (and would be immediately paused again).
+      if (kwsPendingActivation) {
+        kwsPendingActivation = false
+        kwsResumePending = false
+        activatePendingKwsSession()
+        return
+      }
+      // Play deferred speakRunComplete success phrase (if set), then resume KWS.
+      // This ensures KWS isn't running while TTS audio is still coming out of the
+      // speaker — eliminating the false-trigger path that caused spurious
+      // "请再说一遍你的指令" / "没有听到你的指令" prompts.
+      if (_micEnabled.value) {
+        resumeKwsAfterResponse()
+      } else {
+        kwsResumePending = false
+        pendingSpeakRunComplete = false
+      }
+      return
+    }
+    // ── Non-KWS mode: original behaviour unchanged ────────────────────────
     if (!shouldResume) {
-      // In KWS mode the mic was off, so normal resume is skipped. Activate any queued
-      // keyword session now that TTS has finished playing (NodeRuntime path).
       if (kwsPendingActivation && kwsEnabled()) {
         kwsPendingActivation = false
         activatePendingKwsSession()
       }
       return
     }
+    Log.d(tag, "resumeAfterTts: calling start() kwsSessionActive=$kwsSessionActive kwsEnabled=${kwsEnabled()}")
     stopRequested = false
     start()
     sendQueuedIfIdle()
@@ -660,6 +728,7 @@ class MicCaptureManager(
         else -> listeningLabel()
       }
     kwsOnFinalReceived = false  // reset per session; set true by onFinal before onEndOfSpeech
+    Log.d(tag, "startListeningSession: kwsSessionActive=$kwsSessionActive kwsEnabled=${kwsEnabled()} backend=${b::class.simpleName}")
     _isListening.value = true
     b.startListening(context, asrCallbacks)
   }
@@ -687,25 +756,27 @@ class MicCaptureManager(
     // KWS mode: don't auto-restart — stop the backend and wait for next wake word.
     // This applies whether the mic was manually on or keyword-triggered.
     if (kwsEnabled()) {
+      Log.d(tag, "scheduleRestart: KWS mode — kwsSessionActive=$kwsSessionActive → false, session ended, waiting for wake word")
       kwsSessionActive = false
-      Log.d(tag, "scheduleRestart: KWS mode — session ended, waiting for wake word")
       stop()  // clears micOwner — globalMicEnabled drops to false inside onOwnerChanged(null)
-      // Re-assert globalMicEnabled and lastKnownMic since we’re back in KWS waiting state.
+      // Re-assert globalMicEnabled and lastKnownMic since we're back in KWS waiting state.
       // Without this, the float badge would incorrectly show mic as "off" until next keyword.
       lastKnownMic.set(this)
       globalMicEnabled.value = true
       _statusText.value = "Listening for wake word…"
-      // Delay before re-opening KWS AudioRecord: lets Android audio routing fully settle
-      // after the ASR AudioRecord closes. Without this, the new AudioRecord may open while
-      // the previous audio session is still being torn down, resulting in attenuated capture.
-      // Also join any in-flight post-session TTS (retry prompt) so the KWS mic doesn't
-      // capture TTS audio and corrupt the keyword-spotter stream state.
-      val kwsRef = kws
+      // Do NOT resume KWS here — speakCommandAck / voice prompts may still be playing
+      // through the speaker, and the keyword spotter would capture that TTS audio and
+      // false-trigger.  Instead, set a flag so KWS is resumed later by resumeAfterTts()
+      // (proxy-TTS path) or onExternalAssistantComplete() / completePendingTurn()
+      // (text-only fallback path), after ALL response audio has finished.
+      kwsResumePending = true
+      // Still join any in-flight post-session TTS (retry/noinput) so its audio can
+      // complete before the KWS AudioRecord is re-opened later.
       val ttsJob = kwsPostSessionTtsJob.also { kwsPostSessionTtsJob = null }
-      scope.launch(Dispatchers.IO) {
-        ttsJob?.join()  // wait for retry/success audio to finish before opening the mic
-        delay(400L)
-        kwsRef?.resume()
+      if (ttsJob != null) {
+        scope.launch(Dispatchers.IO) {
+          ttsJob.join()
+        }
       }
       return
     }
@@ -735,11 +806,13 @@ class MicCaptureManager(
   private fun queueRecognizedMessage(text: String) {
     val message = text.trim()
     _liveTranscript.value = null
+    Log.d(tag, "queueRecognizedMessage: text='${message.take(40)}' kwsSessionActive=$kwsSessionActive usingIdentityAsr=$usingIdentityAsr")
     if (message.isEmpty()) {
       // Play retry prompt when:
       //  • KWS session: empty = recognition failed after wake word
       //  • Identity ASR: empty = server actively rejected the speaker (identity mismatch)
       if (kwsSessionActive || usingIdentityAsr) {
+        Log.i(tag, "speakRetry triggered: kwsSessionActive=$kwsSessionActive usingIdentityAsr=$usingIdentityAsr")
         kwsPostSessionTtsJob = scope.launch {
           try { speakRetry?.invoke() }
           catch (e: Throwable) { Log.w(tag, "speakRetry failed: ${e.message}") }
@@ -790,6 +863,7 @@ class MicCaptureManager(
 
     val next = firstQueuedMessage() ?: return
     val isKwsSession = kwsSessionActive  // capture before scope.launch — onEndOfSpeech may clear it
+    Log.d(tag, "sendQueuedIfIdle: dispatching kwsSessionActive=$kwsSessionActive isKwsSession=$isKwsSession")
     _isSending.value = true
     if (isKwsSession) pendingRunIsKws = true
     pendingRunTimeoutJob?.cancel()
@@ -901,11 +975,36 @@ class MicCaptureManager(
     val wasKws = pendingRunIsKws
     pendingRunIsKws = false
     if (wasKws) {
-      scope.launch {
-        try { speakRunComplete?.invoke() }
-        catch (e: Throwable) { Log.w(tag, "speakRunComplete (external) failed: ${e.message}") }
-      }
+      pendingSpeakRunComplete = true
     }
+    // Text-only fallback: if no proxy TTS is queued (ttsPauseDepth == 0), KWS was
+    // never paused by pauseForTts() and resumeAfterTts() won't be called.  Play the
+    // deferred speakRunComplete and resume KWS now so the system returns to the
+    // wake-word-waiting state.
+    if (kwsResumePending && synchronized(ttsPauseLock) { ttsPauseDepth == 0 }) {
+      scope.launch { resumeKwsAfterResponse() }
+    }
+  }
+
+  /**
+   * Play any deferred [speakRunComplete] phrase, then resume KWS.
+   * Called when all response-related audio has finished and it is safe to re-open
+   * the KWS AudioRecord without risk of capturing TTS audio from the speaker.
+   */
+  private suspend fun resumeKwsAfterResponse() {
+    kwsResumePending = false
+    if (pendingSpeakRunComplete) {
+      pendingSpeakRunComplete = false
+      try { speakRunComplete?.invoke() }
+      catch (e: Throwable) { Log.w(tag, "speakRunComplete (deferred) failed: ${e.message}") }
+    }
+    // Small delay to let Android audio routing settle after success phrase
+    delay(200L)
+    _statusText.value = "Listening for wake word…"
+    lastKnownMic.set(this)
+    globalMicEnabled.value = true
+    Log.d(tag, "resumeKwsAfterResponse → resuming KWS")
+    kws?.resume()
   }
 
   // ---------------------------------------------------------------------------
@@ -924,10 +1023,7 @@ class MicCaptureManager(
     val wasKws = pendingRunIsKws
     pendingRunIsKws = false
     if (wasKws) {
-      scope.launch {
-        try { speakRunComplete?.invoke() }
-        catch (e: Throwable) { Log.w(tag, "speakRunComplete failed: ${e.message}") }
-      }
+      pendingSpeakRunComplete = true
     }
     // Activate a queued keyword session when no TTS is currently playing (Zero/PicoClaw path).
     // When TTS IS active (NodeRuntime), resumeAfterTts() handles it once TTS finishes.
@@ -935,6 +1031,11 @@ class MicCaptureManager(
       kwsPendingActivation = false
       activatePendingKwsSession()
     } else {
+      // Text-only fallback: if no TTS is playing, play deferred speakRunComplete and
+      // resume KWS so the system returns to wake-word-waiting state.
+      if (kwsResumePending && synchronized(ttsPauseLock) { ttsPauseDepth == 0 }) {
+        scope.launch { resumeKwsAfterResponse() }
+      }
       sendQueuedIfIdle()
     }
   }
@@ -1077,6 +1178,7 @@ class MicCaptureManager(
 
       override fun onFinal(text: String) {
         kwsOnFinalReceived = true  // mark that the backend did produce a result (even if empty)
+        Log.d(tag, "onFinal: text='${text.take(40)}' kwsSessionActive=$kwsSessionActive")
         transcriptFlushJob?.cancel()
         transcriptFlushJob = null
         if (text != flushedPartialTranscript) {
@@ -1101,11 +1203,12 @@ class MicCaptureManager(
       }
 
       override fun onEndOfSpeech() {
-        Log.d(tag, "onEndOfSpeech: stopRequested=$stopRequested micEnabled=${_micEnabled.value} backend=${backend?.let { it::class.simpleName }}")
+        Log.d(tag, "onEndOfSpeech: stopRequested=$stopRequested micEnabled=${_micEnabled.value} kwsSessionActive=$kwsSessionActive kwsOnFinalReceived=$kwsOnFinalReceived backend=${backend?.let { it::class.simpleName }}")
         _inputLevel.value = 0f
         // KWS session ended with no speech at all (VAD timeout, user said nothing after
         // the wake word) — play "no input heard" prompt before resuming KWS listening.
         if (kwsSessionActive && !kwsOnFinalReceived && speakNoInput != null) {
+          Log.i(tag, "speakNoInput triggered: kwsSessionActive=$kwsSessionActive kwsOnFinalReceived=$kwsOnFinalReceived backend=${backend?.let { it::class.simpleName }}")
           kwsPostSessionTtsJob = scope.launch {
             try { speakNoInput.invoke() }
             catch (e: Throwable) { Log.w(tag, "speakNoInput failed: ${e.message}") }

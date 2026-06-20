@@ -160,6 +160,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
     val useCustomAsr by viewModel.useCustomAsr.collectAsState()
     val useIdentityAsr by viewModel.useIdentityAsr.collectAsState()
     val kwsEnabled by viewModel.kwsEnabled.collectAsState()
+    val voiceTtsHint by viewModel.voiceTtsHint.collectAsState()
     val asrUrl by viewModel.asrUrl.collectAsState()
     val voicePrintRegistered by clawberry.aiworm.cn.voice.SpeakerRegistrationManager.globalIsRegistered.collectAsState()
 
@@ -271,6 +272,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     mode = mode,
                     token = token,
                     tokenInput = tokenInput,
+                    voiceTtsHint = voiceTtsHint,
                     onHostChange = viewModel::setHost,
                     onWebPortChange = viewModel::setWebPort,
                     onGatewayPortChange = viewModel::setGatewayPort,
@@ -278,6 +280,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     onModeChange = viewModel::setMode,
                     onTokenInputChange = viewModel::setTokenInput,
                     onClearAndReset = viewModel::clearAndReset,
+                    onVoiceTtsHintChange = viewModel::setVoiceTtsHint,
                 )
             }
             val pcTabConnect = stringResource(R.string.common_connect)
@@ -1635,6 +1638,7 @@ private fun PcSettingsTab(
     mode: PcMode,
     token: String?,
     tokenInput: String,
+    voiceTtsHint: String,
     onHostChange: (String) -> Unit,
     onWebPortChange: (Int) -> Unit,
     onGatewayPortChange: (Int) -> Unit,
@@ -1642,8 +1646,10 @@ private fun PcSettingsTab(
     onModeChange: (PcMode) -> Unit,
     onTokenInputChange: (String) -> Unit,
     onClearAndReset: () -> Unit,
+    onVoiceTtsHintChange: (String) -> Unit,
 ) {
     val scrollState = rememberScrollState()
+    var voiceTtsHintDraft by rememberSaveable(voiceTtsHint) { mutableStateOf(voiceTtsHint) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1725,6 +1731,47 @@ private fun PcSettingsTab(
                 label = stringResource(R.string.pc_settings_token_direct),
                 placeholder = stringResource(R.string.pc_settings_token_placeholder),
                 keyboardType = KeyboardType.Password,
+            )
+        }
+
+        PcSettingsSection(title = "语音 TTS 提示") {
+            OutlinedTextField(
+                value = voiceTtsHintDraft,
+                onValueChange = { voiceTtsHintDraft = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(text = "语音回复提示", color = mobileTextSecondary, style = mobileCaption1) },
+                placeholder = { Text(text = "例：（请用简洁口语回答，避免Markdown格式和特殊符号，适合语音播放）", color = mobileTextTertiary, style = mobileCallout) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Default),
+                minLines = 2,
+                maxLines = 5,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = mobileAccent,
+                    unfocusedBorderColor = mobileBorder,
+                    focusedLabelColor = mobileAccent,
+                    unfocusedLabelColor = mobileTextSecondary,
+                    focusedTextColor = mobileText,
+                    unfocusedTextColor = mobileText,
+                    cursorColor = mobileAccent,
+                    focusedContainerColor = mobileCardSurface,
+                    unfocusedContainerColor = mobileCardSurface,
+                ),
+                textStyle = mobileCallout,
+            )
+            if (voiceTtsHintDraft.trim() != voiceTtsHint) {
+                Button(
+                    onClick = { onVoiceTtsHintChange(voiceTtsHintDraft.trim()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = mobileAccent),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("保存", color = Color.White, style = mobileCallout)
+                }
+            }
+            Text(
+                text = "附加在每条语音消息末尾，引导 AI 给出适合语音播放的简洁口语回答",
+                color = mobileTextTertiary,
+                style = mobileCaption1,
             )
         }
 

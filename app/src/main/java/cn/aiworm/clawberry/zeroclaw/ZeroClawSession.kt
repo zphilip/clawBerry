@@ -47,6 +47,9 @@ sealed class ZcEvent {
   /** Agent or transport error. */
   data class Errored(val message: String) : ZcEvent()
 
+  /** Proxy TTS audio frame (base64 payload). */
+  data class TtsAudio(val audioBase64: String, val format: String?, val isFinal: Boolean) : ZcEvent()
+
   /** Server rejected the token (401 / 403). */
   data object Unauthorized : ZcEvent()
 
@@ -151,6 +154,7 @@ class ZeroClawSession(private val client: OkHttpClient) {
     port: Int,
     token: String?,
     sessionId: String,
+    tts: Boolean = false,
     onEvent: (ZcEvent) -> Unit,
   ): WebSocket {
     // sessionId is supplied by the caller and kept stable across reconnects
@@ -162,6 +166,9 @@ class ZeroClawSession(private val client: OkHttpClient) {
       }
       append("session_id=")
       append(sessionId)
+      if (tts) {
+        append("&tts=1")
+      }
     }
     val req = Request.Builder()
       .url("ws://$host:$port/ws/chat?$params")
@@ -209,6 +216,14 @@ class ZeroClawSession(private val client: OkHttpClient) {
                     message = msg["message"]?.jsonPrimitive?.contentOrNull ?: "Unknown error",
                   )
 
+                "tts.audio", "tts.chunk" -> {
+                  val audio = msg["audio_b64"]?.jsonPrimitive?.contentOrNull ?: return
+                  val format = msg["format"]?.jsonPrimitive?.contentOrNull
+                  val isFinal =
+                    msg["is_final"]?.jsonPrimitive?.booleanOrNull ?: (type == "tts.audio")
+                  ZcEvent.TtsAudio(audioBase64 = audio, format = format, isFinal = isFinal)
+                }
+
                 else -> {
                   // Unknown frame type — silently ignore per chat.py behaviour
                   return
@@ -254,7 +269,7 @@ class ZeroClawSession(private val client: OkHttpClient) {
     port: Int,
     sessionId: String,
     onEvent: (ZcEvent) -> Unit,
-  ): WebSocket = connectChat(host, port, token = null, sessionId, onEvent)
+  ): WebSocket = connectChat(host, port, token = null, sessionId, tts = true, onEvent)
 
   // ---------------------------------------------------------------------------
   // GET /api/sessions  — list all stored sessions

@@ -33,13 +33,16 @@ sealed class PcEvent {
     data object TypingStop : PcEvent()
 
     /** New assistant message finalised. */
-    data class MessageCreate(val messageId: String, val content: String) : PcEvent()
+    data class MessageCreate(val messageId: String, val content: String, val kind: String? = null) : PcEvent()
 
     /** Server is streaming an in-place update to an existing message. */
     data class MessageUpdate(val messageId: String, val content: String) : PcEvent()
 
     /** Server-reported error. */
     data class Errored(val message: String) : PcEvent()
+
+    /** Proxy TTS audio frame (base64 payload). */
+    data class TtsAudio(val audioBase64: String, val format: String?, val isFinal: Boolean) : PcEvent()
 
     /** WS closed. */
     data object Disconnected : PcEvent()
@@ -165,7 +168,9 @@ class PicoClawSession(private val client: OkHttpClient) {
                                     ?.jsonPrimitive?.contentOrNull ?: ""
                                 val content = payload?.get("content")
                                     ?.jsonPrimitive?.contentOrNull ?: ""
-                                onEvent(PcEvent.MessageCreate(messageId = messageId, content = content))
+                                val kind = payload?.get("kind")
+                                    ?.jsonPrimitive?.contentOrNull
+                                onEvent(PcEvent.MessageCreate(messageId = messageId, content = content, kind = kind))
                             }
 
                             "message.update" -> {
@@ -177,9 +182,20 @@ class PicoClawSession(private val client: OkHttpClient) {
                             }
 
                             "error" -> {
-                                val message = payload?.get("message")
-                                    ?.jsonPrimitive?.contentOrNull ?: "Unknown error"
+                                // Proxy / gateway sends {"type":"error","message":"..."} at root;
+                                // fall back to payload.message for spec-compliant servers.
+                                val message = msg["message"]?.jsonPrimitive?.contentOrNull
+                                    ?: payload?.get("message")?.jsonPrimitive?.contentOrNull
+                                    ?: "Unknown error"
                                 onEvent(PcEvent.Errored(message = message))
+                            }
+
+                            "tts.audio", "tts.chunk" -> {
+                                val audio = msg["audio_b64"]?.jsonPrimitive?.contentOrNull ?: return
+                                val format = msg["format"]?.jsonPrimitive?.contentOrNull
+                                val isFinal =
+                                    msg["is_final"]?.jsonPrimitive?.booleanOrNull ?: (type == "tts.audio")
+                                onEvent(PcEvent.TtsAudio(audioBase64 = audio, format = format, isFinal = isFinal))
                             }
 
                             "pong" -> { /* ignore — keep-alive */ }
@@ -212,6 +228,6 @@ class PicoClawSession(private val client: OkHttpClient) {
         host: String,
         port: Int,
         onEvent: (PcEvent) -> Unit,
-    ): WebSocket = connectWs(wsUrl = "ws://$host:$port/pico/ws", token = "", onEvent)
+    ): WebSocket = connectWs(wsUrl = "ws://$host:$port/pico/ws?tts=1&tts_streaming=1", token = "", onEvent)
 }
 

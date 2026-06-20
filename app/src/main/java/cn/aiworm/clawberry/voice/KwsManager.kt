@@ -71,7 +71,11 @@ class KwsManager(
      * [buildSpotter] runs lazily on the IO thread to avoid blocking the main thread.
      */
     fun start(): Boolean {
-        if (running) return true
+        if (running) {
+            Log.d(TAG, "start: already running — no-op")
+            return true
+        }
+        Log.d(TAG, "start called")
         if (!hasMicPermission()) {
             Log.w(TAG, "start: RECORD_AUDIO permission not granted")
             return false
@@ -110,26 +114,37 @@ class KwsManager(
      *  Returns the cancelled [Job] so the caller can [Job.join] to wait until the
      *  AudioRecord is fully released before opening a new one. */
     fun pause(): kotlinx.coroutines.Job? {
-        if (!running) return null
+        if (!running) {
+            Log.d(TAG, "pause: already not running — no-op")
+            return null
+        }
         running = false
         val job = captureJob
         captureJob?.cancel()
         captureJob = null
-        Log.d(TAG, "paused")
         return job  // join this to await AudioRecord release
     }
 
     /** Resume after [pause], reusing the existing loaded spotter (no ONNX reload). */
     fun resume(): Boolean {
-        if (running) return true
-        if (!hasMicPermission()) return false
+        if (running) {
+            Log.d(TAG, "resume: already running — no-op")
+            return true
+        }
+        Log.d(TAG, "resume called")
+        if (!hasMicPermission()) {
+            Log.w(TAG, "resume: RECORD_AUDIO permission not granted")
+            return false
+        }
         // spotter may be null only if stop() was called; modelFilesExist() gating only needed then
-        if (spotter == null && !modelFilesExist()) return false
+        if (spotter == null && !modelFilesExist()) {
+            Log.w(TAG, "resume: KWS model files not found")
+            return false
+        }
         running = true
         captureJob = scope.launch(Dispatchers.IO) {
             runCaptureLoop()  // reuses cached spotter or builds lazily if null
         }
-        Log.d(TAG, "resumed")
         return true
     }
 
@@ -224,7 +239,7 @@ class KwsManager(
                             Log.i(TAG, "Keyword detected: '${result.keyword}' chunk=$chunkCount")
                             onKeyword(result.keyword)
                         } else {
-                            Log.d(TAG, "Keyword '${result.keyword}' suppressed — cooldown ${sinceLastMs}ms < ${KEYWORD_COOLDOWN_MS}ms")
+                            Log.d(TAG, "Keyword '${result.keyword}' suppressed — cooldown ${sinceLastMs}ms < ${KEYWORD_COOLDOWN_MS}ms chunk=$chunkCount rms=${"%.4f".format(rms)}")
                         }
                         kws.reset(stream)
                     }

@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import clawberry.aiworm.cn.voice.TtsModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.Json
@@ -27,6 +28,7 @@ class SecurePrefs(
     private const val appLanguageKey = "ui.language"
     private const val plainPrefsName = "openclaw.node"
     private const val securePrefsName = "openclaw.node.secure"
+    private const val DEFAULT_VOICE_TTS_HINT = "（语音模式：请用简洁口语回答，避免Markdown格式和特殊符号）"
   }
 
   private val appContext = context.applicationContext
@@ -196,6 +198,76 @@ class SecurePrefs(
   fun setKwsAckPhrase(value: String) {
     plainPrefs.edit { putString("asr.kwsAckPhrase", value) }
     _kwsAckPhrase.value = value
+  }
+
+  private val _voiceThinkingPhrase = MutableStateFlow(
+    plainPrefs.getString("asr.voiceThinkingPhrase", "让我考虑下如何完成任务") ?: "让我考虑下如何完成任务",
+  )
+  val voiceThinkingPhrase: StateFlow<String> = _voiceThinkingPhrase
+
+  private val _voiceThinkingEnabled = MutableStateFlow(
+    plainPrefs.getBoolean("asr.voiceThinkingEnabled", true),
+  )
+  val voiceThinkingEnabled: StateFlow<Boolean> = _voiceThinkingEnabled
+
+  fun setVoiceThinkingEnabled(value: Boolean) {
+    plainPrefs.edit { putBoolean("asr.voiceThinkingEnabled", value) }
+    _voiceThinkingEnabled.value = value
+  }
+
+  fun setVoiceThinkingPhrase(value: String) {
+    plainPrefs.edit { putString("asr.voiceThinkingPhrase", value) }
+    _voiceThinkingPhrase.value = value
+  }
+
+  private val _voiceToolCallsPhrase = MutableStateFlow(
+    plainPrefs.getString("asr.voiceToolCallsPhrase", "任务在执行中，还需一些时间") ?: "任务在执行中，还需一些时间",
+  )
+  val voiceToolCallsPhrase: StateFlow<String> = _voiceToolCallsPhrase
+
+  private val _voiceToolCallsEnabled = MutableStateFlow(
+    plainPrefs.getBoolean("asr.voiceToolCallsEnabled", true),
+  )
+  val voiceToolCallsEnabled: StateFlow<Boolean> = _voiceToolCallsEnabled
+
+  fun setVoiceToolCallsEnabled(value: Boolean) {
+    plainPrefs.edit { putBoolean("asr.voiceToolCallsEnabled", value) }
+    _voiceToolCallsEnabled.value = value
+  }
+
+  fun setVoiceToolCallsPhrase(value: String) {
+    plainPrefs.edit { putString("asr.voiceToolCallsPhrase", value) }
+    _voiceToolCallsPhrase.value = value
+  }
+
+  private val _voiceTtsHint = MutableStateFlow(
+    plainPrefs.getString("asr.voiceTtsHint", DEFAULT_VOICE_TTS_HINT) ?: DEFAULT_VOICE_TTS_HINT,
+  )
+  val voiceTtsHint: StateFlow<String> = _voiceTtsHint
+
+  fun setVoiceTtsHint(value: String) {
+    plainPrefs.edit { putString("asr.voiceTtsHint", value) }
+    _voiceTtsHint.value = value
+  }
+
+  private val _ttsModel = MutableStateFlow(
+    TtsModel.fromId(plainPrefs.getString("tts.model", TtsModel.DEFAULT.id) ?: TtsModel.DEFAULT.id),
+  )
+  val ttsModel: StateFlow<TtsModel> = _ttsModel
+
+  fun setTtsModel(value: TtsModel) {
+    plainPrefs.edit { putString("tts.model", value.id) }
+    _ttsModel.value = value
+  }
+
+  private val _ttsSpeakerId = MutableStateFlow(
+    plainPrefs.getInt("tts.speakerId", 0),
+  )
+  val ttsSpeakerId: StateFlow<Int> = _ttsSpeakerId
+
+  fun setTtsSpeakerId(value: Int) {
+    plainPrefs.edit { putInt("tts.speakerId", value) }
+    _ttsSpeakerId.value = value
   }
 
   fun setUseCustomAsr(value: Boolean) {

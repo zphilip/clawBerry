@@ -12,16 +12,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import android.util.Log
 import clawberry.aiworm.cn.voice.KwsManager
 import clawberry.aiworm.cn.voice.KwsTtsPlayer
 import clawberry.aiworm.cn.voice.MicCaptureManager
+import clawberry.aiworm.cn.voice.ProxyTtsAudioPlayer
 import clawberry.aiworm.cn.voice.VoiceConversationEntry
 
 // ---------------------------------------------------------------------------
@@ -63,6 +68,8 @@ data class PcChatMessage(
 // ---------------------------------------------------------------------------
 // ViewModel
 // ---------------------------------------------------------------------------
+private const val DEFAULT_VOICE_TTS_HINT = "（语音模式：请用简洁口语回答，避免Markdown格式和特殊符号）"
+
 class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("picoclaw.direct", Context.MODE_PRIVATE)
@@ -126,6 +133,31 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     )
     val kwsAckPhrase: StateFlow<String> = _kwsAckPhrase.asStateFlow()
 
+    private val _voiceThinkingPhrase = MutableStateFlow(
+        asrPrefs.getString("asr.voiceThinkingPhrase", "让我考虑下如何完成任务") ?: "让我考虑下如何完成任务",
+    )
+    val voiceThinkingPhrase: StateFlow<String> = _voiceThinkingPhrase.asStateFlow()
+
+    private val _voiceThinkingEnabled = MutableStateFlow(
+        asrPrefs.getBoolean("asr.voiceThinkingEnabled", true),
+    )
+    val voiceThinkingEnabled: StateFlow<Boolean> = _voiceThinkingEnabled.asStateFlow()
+
+    private val _voiceToolCallsPhrase = MutableStateFlow(
+        asrPrefs.getString("asr.voiceToolCallsPhrase", "任务在执行中，还需一些时间") ?: "任务在执行中，还需一些时间",
+    )
+    val voiceToolCallsPhrase: StateFlow<String> = _voiceToolCallsPhrase.asStateFlow()
+
+    private val _voiceToolCallsEnabled = MutableStateFlow(
+        asrPrefs.getBoolean("asr.voiceToolCallsEnabled", true),
+    )
+    val voiceToolCallsEnabled: StateFlow<Boolean> = _voiceToolCallsEnabled.asStateFlow()
+
+    private val _voiceTtsHint = MutableStateFlow(
+        asrPrefs.getString("asr.voiceTtsHint", DEFAULT_VOICE_TTS_HINT) ?: DEFAULT_VOICE_TTS_HINT,
+    )
+    val voiceTtsHint: StateFlow<String> = _voiceTtsHint.asStateFlow()
+
     init {
         // Sync globalIsRegistered from persisted prefs so voice chip shows correct state
         // even before the user opens the Settings tab (which creates SpeakerRegistrationManager).
@@ -157,8 +189,14 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         it.updateGreeting(_kwsGreeting.value)
         it.updateRetryPhrase("${_kwsTitle.value}，${_kwsRetryPhrase.value}")
         it.updateSuccessPhrase("${_kwsTitle.value}，${_kwsSuccessPhrase.value}")
+        it.updateThinkingPhrase(_voiceThinkingPhrase.value)
+        it.updateToolCallsPhrase(_voiceToolCallsPhrase.value)
         it.init()
     }
+    private val proxyTtsAudioPlayer = ProxyTtsAudioPlayer(app.applicationContext)
+    // TTS streaming queue — serialises back-to-back chunks for gapless playback
+    private val ttsQueue = Channel<PcEvent.TtsAudio>(Channel.UNLIMITED)
+    @Volatile private var ttsJob: Job? = null
     private val mic: MicCaptureManager = MicCaptureManager(
         context = app.applicationContext,
         scope = viewModelScope,
@@ -173,11 +211,20 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
             context = app.applicationContext,
             scope = viewModelScope,
             onKeyword = { keyword ->
-                android.util.Log.i("PicoClawVM", "KWS keyword: '$keyword'")
+                android.util.Log.i("PicoClawVM", "KWS onKeyword: '$keyword' isPipelineActive=${mic.isPipelineActive}")
                 if (mic.isPipelineActive) {
+                    android.util.Log.i("PicoClawVM", "KWS onKeyword → pipeline BUSY → setPendingKwsActivation")
                     kwsTtsPlayer.playText("主人，我正在处理您的上一条指令，完成后即为您服务")
                     mic.setPendingKwsActivation()
                 } else {
+                    android.util.Log.i("PicoClawVM", "KWS onKeyword → pipeline IDLE → playGreeting → notifyKeyword")
+                    // Stop any in-progress thinking/tool-calls prompt immediately.
+                    // playGreeting() shares promptPlayMutex with voice prompts; without
+                    // interrupting first, the greeting (and notifyKeyword) would be blocked
+                    // for the full remaining prompt duration.
+                    voicePromptJob?.cancel()
+                    voicePromptJob = null
+                    kwsTtsPlayer.stopVoicePrompt()
                     // Start ASR only after the greeting audio finishes so the mic cannot
                     // pick up the greeting and echo it back as user speech.
                     kwsTtsPlayer.playGreeting {
@@ -191,7 +238,9 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         kwsEnabled = { _kwsEnabled.value },
         sendToGateway = { message, onRunIdKnown ->
             onRunIdKnown(java.util.UUID.randomUUID().toString())
-            sendMessage(message)
+            val hint = _voiceTtsHint.value.trim()
+            val textToSend = if (hint.isNotEmpty()) "$message\n\n$hint" else message
+            sendMessage(textToSend, isVoiceInitiated = true)
             null  // no runId tracking — responses come via onExternalAssistant*
         },
         speakAssistantReply = {},   // no TTS for Pico voice tab
@@ -272,6 +321,34 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         _kwsAckPhrase.value = value
     }
 
+    fun setVoiceThinkingPhrase(value: String) {
+        asrPrefs.edit().putString("asr.voiceThinkingPhrase", value).apply()
+        _voiceThinkingPhrase.value = value
+        kwsTtsPlayer.updateThinkingPhrase(value)
+    }
+
+    fun setVoiceThinkingEnabled(value: Boolean) {
+        asrPrefs.edit().putBoolean("asr.voiceThinkingEnabled", value).apply()
+        _voiceThinkingEnabled.value = value
+    }
+
+    fun setVoiceToolCallsPhrase(value: String) {
+        asrPrefs.edit().putString("asr.voiceToolCallsPhrase", value).apply()
+        _voiceToolCallsPhrase.value = value
+        kwsTtsPlayer.updateToolCallsPhrase(value)
+    }
+
+    fun setVoiceToolCallsEnabled(value: Boolean) {
+        asrPrefs.edit().putBoolean("asr.voiceToolCallsEnabled", value).apply()
+        _voiceToolCallsEnabled.value = value
+    }
+
+    fun setVoiceTtsHint(value: String) {
+        asrPrefs.edit().putString("asr.voiceTtsHint", value).apply()
+        _voiceTtsHint.value = value
+    }
+
+
     // ── Auto-reconnect ────────────────────────────────────────────────────────
     private var reconnectJob: Job? = null
     @Volatile private var reconnectAttempt = 0
@@ -281,6 +358,23 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var cachedWsUrl: String? = null
     @Volatile private var cachedToken: String? = null
     @Volatile private var typingActive = false
+    /** Tracks the active voice-prompt coroutine so a new prompt can cancel the previous one. */
+    private var voicePromptJob: Job? = null
+    /** Single-lane gate: only one prompt (thinking/tool-calls) can run at a time. */
+    private val voicePromptGate = Semaphore(1)
+    /** True while the TTS stream is actively playing; blocks late voice-prompt triggers. */
+    @Volatile private var ttsIsActive = false
+    /** True once at least one proxy TTS chunk was seen for the current assistant turn. */
+    @Volatile private var sawProxyTtsChunkThisTurn = false
+    /** True when the current assistant turn was triggered by voice (KWS/ASR) input, not typed text. */
+    @Volatile private var lastTurnWasVoice = false
+    /** Final assistant text buffered until proxy TTS reaches isFinal=true. */
+    @Volatile private var pendingAssistantFinalText: String? = null
+    /** Timeout fallback in case a turn was marked voice but no TTS chunk arrives. */
+    private var pendingCompletionFallbackJob: Job? = null
+    /** Message IDs of assistant messages created in the current typing round.
+     *  Only updates to these IDs are forwarded to the voice panel. */
+    private val currentRoundMessageIds = mutableSetOf<String>()
 
     // ── Persisted setters ─────────────────────────────────────────────────────
     fun setHost(v: String) {
@@ -401,6 +495,16 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
 
             is PcEvent.TypingStart -> {
                 typingActive = true
+                currentRoundMessageIds.clear()
+                sawProxyTtsChunkThisTurn = false
+                pendingAssistantFinalText = null
+                pendingCompletionFallbackJob?.cancel()
+                pendingCompletionFallbackJob = null
+                voicePromptJob?.cancel()
+                kwsTtsPlayer.stopVoicePrompt()
+                voicePromptJob = null
+                ttsIsActive = false
+                Log.d("PicoClaw", "[voice] typing.start — voice state reset")
                 _messages.update { msgs ->
                     if (msgs.none { it.role == "typing" }) {
                         msgs + PcChatMessage(role = "typing", content = "")
@@ -411,23 +515,72 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
             is PcEvent.TypingStop -> {
                 typingActive = false
                 _messages.update { msgs -> msgs.filter { it.role != "typing" } }
-                // Finalize voice UI with the last known assistant message content
-                val lastContent = _messages.value.lastOrNull { it.role == "assistant" }?.content ?: ""
-                mic.onExternalAssistantComplete(lastContent)
+                // Finalize voice UI only with content from the current round's messages.
+                // Ignoring old messages avoids surfacing previous-round content when the
+                // server sends message.update events for a carry-over message ID.
+                val lastContent = _messages.value.lastOrNull { msg ->
+                    msg.role == "assistant" &&
+                    (msg.serverMessageId == null || msg.serverMessageId in currentRoundMessageIds)
+                }?.content ?: ""
+                completeAssistantTurn(lastContent, "typing.stop")
             }
 
             is PcEvent.MessageCreate -> {
+                val msgId = event.messageId.ifBlank { null }
+                if (msgId != null) currentRoundMessageIds.add(msgId)
                 _messages.update { msgs ->
                     msgs.filter { it.role != "typing" } +
                         PcChatMessage(
                             role = "assistant",
                             content = event.content,
-                            serverMessageId = event.messageId.ifBlank { null },
+                            serverMessageId = msgId,
                         )
                 }
                 mic.onExternalAssistantDelta(event.content)
                 if (!typingActive) {
-                    mic.onExternalAssistantComplete(event.content)
+                    completeAssistantTurn(event.content, "message.create")
+                }
+                // Voice prompts for intermediate frames (proxy/TTS mode only, once per round)
+                if (mode.value == PcMode.Proxy) {
+                    val kind = event.kind
+                    val thinkingEnabled = asrPrefs.getBoolean("asr.voiceThinkingEnabled", true)
+                    val toolCallsEnabled = asrPrefs.getBoolean("asr.voiceToolCallsEnabled", true)
+                    Log.d("PicoClaw", "[voice] message.create kind=${kind ?: "(none)"} ttsActive=$ttsIsActive promptJobActive=${voicePromptJob?.isActive}")
+                    when (kind) {
+                        "thought", "thinking" -> {
+                            if (thinkingEnabled && !ttsIsActive) {
+                                Log.d("PicoClaw", "[voice] → triggering thinking prompt")
+                                voicePromptJob?.cancel()
+                                val gen = kwsTtsPlayer.stopVoicePrompt()
+                                voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+                                    voicePromptGate.withPermit {
+                                        runCatching { kwsTtsPlayer.playThinkingSuspend(gen) }
+                                            .onSuccess { Log.d("PicoClaw", "[voice] thinking prompt done gen=$gen") }
+                                            .onFailure { Log.w("PicoClaw", "[voice] thinking prompt failed gen=$gen", it) }
+                                    }
+                                }
+                            } else {
+                                Log.d("PicoClaw", "[voice] → thinking prompt skipped (enabled=$thinkingEnabled ttsActive=$ttsIsActive)")
+                            }
+                        }
+                        "tool_calls", "tool-calls" -> {
+                            if (toolCallsEnabled && !ttsIsActive) {
+                                Log.d("PicoClaw", "[voice] → triggering tool-calls prompt")
+                                voicePromptJob?.cancel()
+                                val gen = kwsTtsPlayer.stopVoicePrompt()
+                                voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+                                    voicePromptGate.withPermit {
+                                        runCatching { kwsTtsPlayer.playToolCallsSuspend(gen) }
+                                            .onSuccess { Log.d("PicoClaw", "[voice] tool-calls prompt done gen=$gen") }
+                                            .onFailure { Log.w("PicoClaw", "[voice] tool-calls prompt failed gen=$gen", it) }
+                                    }
+                                }
+                            } else {
+                                Log.d("PicoClaw", "[voice] → tool-calls prompt skipped (enabled=$toolCallsEnabled ttsActive=$ttsIsActive)")
+                            }
+                        }
+                        else -> Log.d("PicoClaw", "[voice] → no prompt for kind=${kind ?: "(none)"}")
+                    }
                 }
             }
 
@@ -449,9 +602,75 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                             )
                     }
                 }
-                mic.onExternalAssistantDelta(event.content)
-                if (!typingActive) {
-                    mic.onExternalAssistantComplete(event.content)
+                // Only forward to voice panel if this message was created in the current round;
+                // updates to carry-over messages from a previous round must not bleed into the
+                // new round's voice conversation entry.
+                if (event.messageId.isBlank() || event.messageId in currentRoundMessageIds) {
+                    mic.onExternalAssistantDelta(event.content)
+                    if (!typingActive) {
+                        completeAssistantTurn(event.content, "message.update")
+                    }
+                }
+            }
+
+            is PcEvent.TtsAudio -> {
+                if (mode.value != PcMode.Proxy) return
+                if (!lastTurnWasVoice) return  // text-typed messages must not trigger TTS playback
+                sawProxyTtsChunkThisTurn = true
+                pendingCompletionFallbackJob?.cancel()
+                pendingCompletionFallbackJob = null
+                Log.d("PicoClaw", "[tts] chunk received format=${event.format} isFinal=${event.isFinal} b64len=${event.audioBase64.length} (~${event.audioBase64.length * 3 / 4}B) — queuing")
+                ttsQueue.trySend(event)
+                if (ttsJob?.isActive != true) {
+                    // Set ttsIsActive BEFORE launching the async job so that any
+                    // MessageCreate events arriving on the same WebSocket thread
+                    // before the job's first iteration see ttsIsActive=true and
+                    // skip voice-prompt playback.  Without this, a brief window
+                    // exists where both the prompt AudioTrack and the proxy-TTS
+                    // MediaPlayer/AudioTrack play concurrently.
+                    ttsIsActive = true
+                    voicePromptJob?.cancel()
+                    voicePromptJob = null
+                    kwsTtsPlayer.stopVoicePrompt()
+                    ttsJob = viewModelScope.launch(Dispatchers.IO) {
+                        var paused = false
+                        var ttsCompleted = false
+                        var chunkIndex = 0
+                        try {
+                            for (chunk in ttsQueue) {
+                                if (!paused) {
+                                    Log.d("PicoClaw", "[tts] stream start — pausing mic")
+                                    mic.pauseForTts()
+                                    paused = true
+                                }
+                                Log.d("PicoClaw", "[tts] playing chunk #${++chunkIndex} isFinal=${chunk.isFinal} format=${chunk.format} b64len=${chunk.audioBase64.length} (~${chunk.audioBase64.length * 3 / 4}B)")
+                                runCatching { proxyTtsAudioPlayer.playRaw(chunk.audioBase64, chunk.format) }
+                                    .onFailure { Log.w("PicoClaw", "[tts] playRaw failed on chunk #$chunkIndex", it) }
+                                if (chunk.isFinal) { ttsCompleted = true; break }
+                            }
+                        } finally {
+                            ttsIsActive = false
+                            if (paused) {
+                                if (ttsCompleted) {
+                                    Log.d("PicoClaw", "[tts] stream complete ($chunkIndex chunks)")
+                                } else {
+                                    Log.d("PicoClaw", "[tts] stream interrupted after $chunkIndex chunks")
+                                }
+                                if (ttsCompleted) {
+                                    val finalText = pendingAssistantFinalText
+                                        ?: _messages.value.lastOrNull { msg ->
+                                            msg.role == "assistant" &&
+                                            (msg.serverMessageId == null || msg.serverMessageId in currentRoundMessageIds)
+                                        }?.content
+                                    if (!finalText.isNullOrBlank()) {
+                                        finalizeAssistantTurnNow(finalText, "tts-final")
+                                    }
+                                }
+                                runCatching { mic.resumeAfterTts() }
+                            }
+                            ttsJob = null
+                        }
+                    }
                 }
             }
 
@@ -463,12 +682,26 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                         it + PcChatMessage(role = "system_error", content = event.message)
                     }
                 }
-                mic.onExternalAssistantComplete(event.message)
+                pendingAssistantFinalText = null
+                pendingCompletionFallbackJob?.cancel()
+                pendingCompletionFallbackJob = null
+                finalizeAssistantTurnNow(event.message, "error")
             }
 
             is PcEvent.Disconnected -> {
                 typingActive = false
+                ttsIsActive = false
                 mic.onGatewayConnectionChanged(false)
+                ttsJob?.cancel()
+                ttsJob = null
+                sawProxyTtsChunkThisTurn = false
+                pendingAssistantFinalText = null
+                pendingCompletionFallbackJob?.cancel()
+                pendingCompletionFallbackJob = null
+                voicePromptJob?.cancel()
+                voicePromptJob = null
+                kwsTtsPlayer.stopVoicePrompt()
+                viewModelScope.launch(Dispatchers.IO) { proxyTtsAudioPlayer.stop() }
                 webSocket = null
                 _messages.update { msgs -> msgs.filter { it.role != "typing" } }
                 if (wasUserDisconnect) {
@@ -486,11 +719,58 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun completeAssistantTurn(finalText: String, source: String) {
+        if (mode.value == PcMode.Proxy) {
+            pendingAssistantFinalText = finalText
+            if (sawProxyTtsChunkThisTurn || ttsIsActive) {
+                Log.d("PicoClaw", "[voice] completion deferred until final TTS chunk source=$source")
+                return
+            }
+            // Fallback: if this turn does not actually produce proxy TTS, complete on text.
+            // Important: schedule only once. Repeated message.create/update frames can arrive
+            // every few hundred ms; if we keep cancel+reschedule, completion is starved and
+            // promptedThinking/promptedToolCalls remain stuck true for too long.
+            if (pendingCompletionFallbackJob?.isActive != true) {
+                pendingCompletionFallbackJob = viewModelScope.launch(Dispatchers.IO) {
+                    delay(1200L)
+                    if (!sawProxyTtsChunkThisTurn) {
+                        val text = pendingAssistantFinalText
+                        pendingAssistantFinalText = null
+                        if (!text.isNullOrBlank()) finalizeAssistantTurnNow(text, "fallback-text:$source")
+                    }
+                }
+            }
+            return
+        }
+        finalizeAssistantTurnNow(finalText, "text:$source")
+    }
+
+    private fun finalizeAssistantTurnNow(finalText: String, reason: String) {
+        mic.onExternalAssistantComplete(finalText)
+        sawProxyTtsChunkThisTurn = false
+        pendingAssistantFinalText = null
+        pendingCompletionFallbackJob?.cancel()
+        pendingCompletionFallbackJob = null
+        currentRoundMessageIds.clear()
+        Log.d("PicoClaw", "[voice] assistant turn finalized reason=$reason")
+    }
+
     // ── Send ──────────────────────────────────────────────────────────────────
-    fun sendMessage(text: String, attachments: List<PcImageAttachment> = emptyList()) {
+    fun sendMessage(text: String, attachments: List<PcImageAttachment> = emptyList(), isVoiceInitiated: Boolean = false) {
         val ws = webSocket ?: return
         val content = text.trim()
         if (content.isEmpty() && attachments.isEmpty()) return
+        // Start a fresh prompt round even if typing.start is delayed or missing.
+        voicePromptJob?.cancel()
+        voicePromptJob = null
+        kwsTtsPlayer.stopVoicePrompt()
+        sawProxyTtsChunkThisTurn = false
+        lastTurnWasVoice = isVoiceInitiated
+        pendingAssistantFinalText = null
+        pendingCompletionFallbackJob?.cancel()
+        pendingCompletionFallbackJob = null
+        ttsIsActive = false
+        Log.d("PicoClaw", "[voice] sendMessage — voice state reset (voice=$isVoiceInitiated)")
         _messages.update { it + PcChatMessage(role = "user", content = content, attachments = attachments) }
         val counter = msgCounter.incrementAndGet()
         val msgId = "msg-$counter-${System.currentTimeMillis()}"
@@ -640,6 +920,7 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         reconnectJob?.cancel()
         webSocket?.cancel()
         webSocket = null
+        viewModelScope.launch(Dispatchers.IO) { proxyTtsAudioPlayer.release() }
         kwsTtsPlayer.release()
     }
 

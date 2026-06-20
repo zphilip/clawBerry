@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -80,6 +81,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.res.stringResource
 import clawberry.aiworm.cn.voice.KwsTtsPlayer
+import clawberry.aiworm.cn.voice.TtsModel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
@@ -108,12 +110,23 @@ fun SettingsSheet(viewModel: MainViewModel) {
   var kwsSuccessPhraseDraft by rememberSaveable(kwsSuccessPhrase) { mutableStateOf(kwsSuccessPhrase) }
   val kwsAckPhrase by viewModel.kwsAckPhrase.collectAsState()
   var kwsAckPhraseDraft by rememberSaveable(kwsAckPhrase) { mutableStateOf(kwsAckPhrase) }
+  val voiceThinkingPhrase by viewModel.voiceThinkingPhrase.collectAsState()
+  val voiceThinkingEnabled by viewModel.voiceThinkingEnabled.collectAsState()
+  var voiceThinkingPhraseDraft by rememberSaveable(voiceThinkingPhrase) { mutableStateOf(voiceThinkingPhrase) }
+  val voiceToolCallsPhrase by viewModel.voiceToolCallsPhrase.collectAsState()
+  val voiceToolCallsEnabled by viewModel.voiceToolCallsEnabled.collectAsState()
+  var voiceToolCallsPhraseDraft by rememberSaveable(voiceToolCallsPhrase) { mutableStateOf(voiceToolCallsPhrase) }
+  val voiceTtsHint by viewModel.voiceTtsHint.collectAsState()
+  var voiceTtsHintDraft by rememberSaveable(voiceTtsHint) { mutableStateOf(voiceTtsHint) }
   val identityAsrThreshold by viewModel.identityAsrThreshold.collectAsState()
+  val ttsModel by viewModel.ttsModel.collectAsState()
+  val ttsSpeakerId by viewModel.ttsSpeakerId.collectAsState()
+  var ttsSpeakerIdDraft by rememberSaveable(ttsSpeakerId) { mutableStateOf(ttsSpeakerId.toString()) }
 
   // Self-contained TTS player for the greeting preview — works even before NodeRuntime starts
   val greetingPreviewScope = rememberCoroutineScope()
-  val greetingPreviewPlayer = remember(context) {
-    KwsTtsPlayer(context, greetingPreviewScope).also { it.init() }
+  val greetingPreviewPlayer = remember(context, ttsModel, ttsSpeakerId) {
+    KwsTtsPlayer(context, greetingPreviewScope, ttsModel, ttsSpeakerId).also { it.init() }
   }
   DisposableEffect(greetingPreviewPlayer) { onDispose { greetingPreviewPlayer.release() } }
 
@@ -1035,10 +1048,116 @@ fun SettingsSheet(viewModel: MainViewModel) {
         }
       }
 
+      // ── TTS Model ──
+      item {
+        Text(
+          if (appLanguage == AppLanguage.ChineseSimplified) "TTS 语音模型" else "TTS MODEL",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        Column(modifier = Modifier.settingsRowModifier()) {
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "语音合成模型" else "TTS Engine",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "选择用于关键词唤醒提示音的 TTS 模型" else "Model used for KWS voice prompts",
+                style = mobileCallout,
+              )
+            },
+          )
+          Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 4.dp)) {
+            TtsModel.entries.forEach { model ->
+              Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clickable { viewModel.setTtsModel(model) }
+                  .padding(vertical = 4.dp),
+              ) {
+                RadioButton(
+                  selected = ttsModel == model,
+                  onClick = { viewModel.setTtsModel(model) },
+                )
+                Column(modifier = Modifier.padding(start = 8.dp)) {
+                  Text(model.displayName, style = mobileHeadline)
+                  Text(
+                    if (appLanguage == AppLanguage.ChineseSimplified)
+                      if (model.maxSpeakers > 1) "${model.maxSpeakers} 个声线 (0–${model.maxSpeakers - 1})" else "1 个声线"
+                    else
+                      if (model.maxSpeakers > 1) "${model.maxSpeakers} voices (0–${model.maxSpeakers - 1})" else "1 voice",
+                    style = mobileCallout,
+                    color = mobileTextTertiary,
+                  )
+                }
+              }
+            }
+          }
+          // Speaker ID — only shown for multi-speaker models
+          if (ttsModel.maxSpeakers > 1) {
+            ListItem(
+              modifier = Modifier.fillMaxWidth(),
+              colors = listItemColors,
+              headlineContent = {
+                Text(
+                  if (appLanguage == AppLanguage.ChineseSimplified) "声线 ID" else "Speaker ID",
+                  style = mobileHeadline,
+                )
+              },
+              supportingContent = {
+                Text(
+                  if (appLanguage == AppLanguage.ChineseSimplified)
+                    "0 到 ${ttsModel.maxSpeakers - 1} 之间的整数"
+                  else
+                    "Integer between 0 and ${ttsModel.maxSpeakers - 1}",
+                  style = mobileCallout,
+                )
+              },
+            )
+            OutlinedTextField(
+              value = ttsSpeakerIdDraft,
+              onValueChange = { ttsSpeakerIdDraft = it.filter { c -> c.isDigit() } },
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 12.dp),
+              singleLine = true,
+              placeholder = { Text("0", style = mobileCallout, color = mobileTextTertiary) },
+              colors = settingsTextFieldColors(),
+              textStyle = mobileCaption1.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+              trailingIcon = {
+                val parsed = ttsSpeakerIdDraft.toIntOrNull()
+                val valid = parsed != null && parsed in 0 until ttsModel.maxSpeakers
+                if (valid && parsed != ttsSpeakerId) {
+                  Button(
+                    onClick = { viewModel.setTtsSpeakerId(parsed!!) },
+                    modifier = Modifier.padding(end = 4.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = settingsPrimaryButtonColors(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                  ) {
+                    Text(stringResource(R.string.common_save), style = mobileCallout)
+                  }
+                }
+              },
+            )
+          }
+        }
+      }
+
       // ── Voice Print ──
       item {
         Text(
-          if (appLanguage == AppLanguage.ChineseSimplified) "唤醒词设置" else "WAKE WORD",
+          if (appLanguage == AppLanguage.ChineseSimplified) "语音提示" else "VOICE PROMPTS",
           style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
           color = mobileAccent,
         )
@@ -1344,6 +1463,221 @@ fun SettingsSheet(viewModel: MainViewModel) {
               )
             }
           }
+          HorizontalDivider(color = mobileBorder)
+          // ── thinking prompt (agent) ──
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "思考提示" else "Thinking Prompt",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "代理思考时播放的语音" else "Played while the agent is thinking",
+                style = mobileCallout,
+              )
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Text(
+              if (appLanguage == AppLanguage.ChineseSimplified) "启用该提示音" else "Enable this prompt",
+              style = mobileCallout,
+              color = mobileTextSecondary,
+            )
+            Switch(
+              checked = voiceThinkingEnabled,
+              onCheckedChange = { viewModel.setVoiceThinkingEnabled(it) },
+            )
+          }
+          OutlinedTextField(
+            value = voiceThinkingPhraseDraft,
+            onValueChange = { voiceThinkingPhraseDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            singleLine = true,
+            placeholder = { Text("让我考虑下如何完成任务", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (voiceThinkingPhraseDraft.trim() != voiceThinkingPhrase) {
+                Button(
+                  onClick = { viewModel.setVoiceThinkingPhrase(voiceThinkingPhraseDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.End,
+          ) {
+            OutlinedButton(
+              onClick = { greetingPreviewPlayer.playText(voiceThinkingPhraseDraft.trim().ifEmpty { voiceThinkingPhrase }) },
+              shape = RoundedCornerShape(8.dp),
+              border = BorderStroke(1.dp, mobileAccent),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+            ) {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "试听" else "Preview",
+                style = mobileCallout,
+              )
+            }
+          }
+          HorizontalDivider(color = mobileBorder)
+          // ── tool calls prompt (agent) ──
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "执行中提示" else "Tool-Calls Prompt",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "代理调用工具时播放的语音" else "Played when the agent is calling tools",
+                style = mobileCallout,
+              )
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Text(
+              if (appLanguage == AppLanguage.ChineseSimplified) "启用该提示音" else "Enable this prompt",
+              style = mobileCallout,
+              color = mobileTextSecondary,
+            )
+            Switch(
+              checked = voiceToolCallsEnabled,
+              onCheckedChange = { viewModel.setVoiceToolCallsEnabled(it) },
+            )
+          }
+          OutlinedTextField(
+            value = voiceToolCallsPhraseDraft,
+            onValueChange = { voiceToolCallsPhraseDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            singleLine = true,
+            placeholder = { Text("任务在执行中，还需一些时间", style = mobileCallout, color = mobileTextTertiary) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (voiceToolCallsPhraseDraft.trim() != voiceToolCallsPhrase) {
+                Button(
+                  onClick = { viewModel.setVoiceToolCallsPhrase(voiceToolCallsPhraseDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.End,
+          ) {
+            OutlinedButton(
+              onClick = { greetingPreviewPlayer.playText(voiceToolCallsPhraseDraft.trim().ifEmpty { voiceToolCallsPhrase }) },
+              shape = RoundedCornerShape(8.dp),
+              border = BorderStroke(1.dp, mobileAccent),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = mobileAccent),
+            ) {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "试听" else "Preview",
+                style = mobileCallout,
+              )
+            }
+          }
+        }
+      }
+
+      // ── TTS Format Hint ──
+      item {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, mobileBorder, RoundedCornerShape(14.dp))
+            .background(mobileCardSurface, RoundedCornerShape(14.dp)),
+        ) {
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "语音 TTS 格式提示" else "Voice TTS Format Hint",
+                style = mobileHeadline,
+              )
+            },
+            supportingContent = {
+              Text(
+                if (appLanguage == AppLanguage.ChineseSimplified) "附加在每条语音消息末尾，提示 AI 以适合语音播放的格式回复" else "Appended to each voice message to guide TTS-friendly AI responses",
+                style = mobileCallout,
+              )
+            },
+          )
+          OutlinedTextField(
+            value = voiceTtsHintDraft,
+            onValueChange = { voiceTtsHintDraft = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 12.dp),
+            minLines = 2,
+            maxLines = 5,
+            placeholder = { Text(
+              if (appLanguage == AppLanguage.ChineseSimplified)
+                "例：（语音模式：请用简洁口语回答，避免Markdown格式和特殊符号）"
+              else
+                "e.g. (Voice mode: reply concisely in plain speech, avoid Markdown)",
+              style = mobileCallout, color = mobileTextTertiary,
+            ) },
+            colors = settingsTextFieldColors(),
+            textStyle = mobileCaption1,
+            trailingIcon = {
+              if (voiceTtsHintDraft.trim() != voiceTtsHint) {
+                Button(
+                  onClick = { viewModel.setVoiceTtsHint(voiceTtsHintDraft.trim()) },
+                  modifier = Modifier.padding(end = 4.dp),
+                  shape = RoundedCornerShape(8.dp),
+                  colors = settingsPrimaryButtonColors(),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
+                  Text(stringResource(R.string.common_save), style = mobileCallout)
+                }
+              }
+            },
+          )
         }
       }
 

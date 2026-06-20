@@ -11,14 +11,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import android.util.Log
 import clawberry.aiworm.cn.voice.KwsManager
 import clawberry.aiworm.cn.voice.KwsTtsPlayer
 import clawberry.aiworm.cn.voice.MicCaptureManager
+import clawberry.aiworm.cn.voice.ProxyTtsAudioPlayer
 import clawberry.aiworm.cn.voice.VoiceConversationEntry
 
 // ---------------------------------------------------------------------------
@@ -128,6 +131,26 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   )
   val kwsAckPhrase: StateFlow<String> = _kwsAckPhrase.asStateFlow()
 
+  private val _voiceThinkingPhrase = MutableStateFlow(
+    asrPrefs.getString("asr.voiceThinkingPhrase", "让我考虑下如何完成任务") ?: "让我考虑下如何完成任务",
+  )
+  val voiceThinkingPhrase: StateFlow<String> = _voiceThinkingPhrase.asStateFlow()
+
+  private val _voiceThinkingEnabled = MutableStateFlow(
+    asrPrefs.getBoolean("asr.voiceThinkingEnabled", true),
+  )
+  val voiceThinkingEnabled: StateFlow<Boolean> = _voiceThinkingEnabled.asStateFlow()
+
+  private val _voiceToolCallsPhrase = MutableStateFlow(
+    asrPrefs.getString("asr.voiceToolCallsPhrase", "任务在执行中，还需一些时间") ?: "任务在执行中，还需一些时间",
+  )
+  val voiceToolCallsPhrase: StateFlow<String> = _voiceToolCallsPhrase.asStateFlow()
+
+  private val _voiceToolCallsEnabled = MutableStateFlow(
+    asrPrefs.getBoolean("asr.voiceToolCallsEnabled", true),
+  )
+  val voiceToolCallsEnabled: StateFlow<Boolean> = _voiceToolCallsEnabled.asStateFlow()
+
   init {
     // Sync globalIsRegistered from persisted prefs so voice chip shows correct state
     // even before the user opens the Settings tab (which creates SpeakerRegistrationManager).
@@ -155,8 +178,14 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     it.updateGreeting(_kwsGreeting.value)
     it.updateRetryPhrase("${_kwsTitle.value}，${_kwsRetryPhrase.value}")
     it.updateSuccessPhrase("${_kwsTitle.value}，${_kwsSuccessPhrase.value}")
+    it.updateThinkingPhrase(_voiceThinkingPhrase.value)
+    it.updateToolCallsPhrase(_voiceToolCallsPhrase.value)
     it.init()
   }
+  private val proxyTtsAudioPlayer = ProxyTtsAudioPlayer(app.applicationContext)
+  // TTS streaming queue — serialises back-to-back chunks for gapless playback
+  private val ttsQueue = Channel<ZcEvent.TtsAudio>(Channel.UNLIMITED)
+  @Volatile private var ttsJob: Job? = null
   private val mic: MicCaptureManager = MicCaptureManager(
     context = app.applicationContext,
     scope = viewModelScope,
@@ -171,11 +200,13 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
       context = app.applicationContext,
       scope = viewModelScope,
       onKeyword = { keyword ->
-        android.util.Log.i("ZeroClawVM", "KWS keyword: '$keyword'")
+        android.util.Log.i("ZeroClawVM", "KWS onKeyword: '$keyword' isPipelineActive=${mic.isPipelineActive}")
         if (mic.isPipelineActive) {
+          android.util.Log.i("ZeroClawVM", "KWS onKeyword → pipeline BUSY → setPendingKwsActivation")
           kwsTtsPlayer.playText("${_kwsTitle.value}，我正在处理您的上一条指令，完成后即为您服务")
           mic.setPendingKwsActivation()
         } else {
+          android.util.Log.i("ZeroClawVM", "KWS onKeyword → pipeline IDLE → playGreeting → notifyKeyword")
           // Start ASR only after the greeting audio finishes so the mic cannot
           // pick up the greeting and echo it back as user speech.
           kwsTtsPlayer.playGreeting {
@@ -270,6 +301,28 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     _kwsAckPhrase.value = value
   }
 
+  fun setVoiceThinkingPhrase(value: String) {
+    asrPrefs.edit().putString("asr.voiceThinkingPhrase", value).apply()
+    _voiceThinkingPhrase.value = value
+    kwsTtsPlayer.updateThinkingPhrase(value)
+  }
+
+  fun setVoiceThinkingEnabled(value: Boolean) {
+    asrPrefs.edit().putBoolean("asr.voiceThinkingEnabled", value).apply()
+    _voiceThinkingEnabled.value = value
+  }
+
+  fun setVoiceToolCallsPhrase(value: String) {
+    asrPrefs.edit().putString("asr.voiceToolCallsPhrase", value).apply()
+    _voiceToolCallsPhrase.value = value
+    kwsTtsPlayer.updateToolCallsPhrase(value)
+  }
+
+  fun setVoiceToolCallsEnabled(value: Boolean) {
+    asrPrefs.edit().putBoolean("asr.voiceToolCallsEnabled", value).apply()
+    _voiceToolCallsEnabled.value = value
+  }
+
   // --- Internal ---
   private var webSocket: okhttp3.WebSocket? = null
   private var streamingMsgId: String? = null
@@ -277,6 +330,18 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   @Volatile private var wasUserDisconnect = false
   // When true, a reconnect is already in flight — don't transition to Idle on disconnect
   @Volatile private var pendingReconnect = false
+  // Voice prompt dedup: reset when user sends a new message
+  @Volatile private var promptedToolCalls = false
+  /** Tracks the active voice-prompt coroutine so a new prompt can cancel the previous one. */
+  private var voicePromptJob: Job? = null
+  /** True while TTS stream is actively playing; blocks late voice-prompt triggers. */
+  @Volatile private var ttsIsActive = false
+  /** True once at least one proxy TTS chunk was seen for the current assistant turn. */
+  @Volatile private var sawProxyTtsChunkThisTurn = false
+  /** Final assistant text buffered until proxy TTS reaches isFinal=true. */
+  @Volatile private var pendingAssistantFinalText: String? = null
+  /** Timeout fallback in case no proxy TTS chunk arrives for a turn. */
+  private var pendingCompletionFallbackJob: Job? = null
   // Auto-reconnect state
   private var reconnectJob: Job? = null
   private val _reconnectAttempt = MutableStateFlow(0)
@@ -474,22 +539,94 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
           val finalText = event.fullResponse.ifEmpty {
             _messages.value.find { it.id == id }?.content ?: ""
           }
-          mic.onExternalAssistantComplete(finalText)
+          completeAssistantTurn(finalText, "done")
           streamingMsgId = null
         } else if (event.fullResponse.isNotEmpty()) {
           _messages.update { it + ZcChatMessage(role = "assistant", content = event.fullResponse) }
-          mic.onExternalAssistantComplete(event.fullResponse)
+          completeAssistantTurn(event.fullResponse, "done:no-streaming-id")
         }
       }
 
       is ZcEvent.Message -> {
         streamingMsgId = null
         _messages.update { it + ZcChatMessage(role = "assistant", content = event.content) }
+        if (!useProxy.value) completeAssistantTurn(event.content, "message")
+      }
+
+      is ZcEvent.TtsAudio -> {
+        if (!useProxy.value) return
+        sawProxyTtsChunkThisTurn = true
+        pendingCompletionFallbackJob?.cancel()
+        pendingCompletionFallbackJob = null
+        Log.d("ZeroClaw", "[tts] chunk received format=${event.format} isFinal=${event.isFinal} b64len=${event.audioBase64.length} (~${event.audioBase64.length * 3 / 4}B) — queuing")
+        ttsQueue.trySend(event)
+        if (ttsJob?.isActive != true) {
+          // Set ttsIsActive BEFORE launching the async job so that any
+          // MessageCreate events arriving on the same WebSocket thread
+          // before the job's first iteration see ttsIsActive=true and
+          // skip voice-prompt playback.
+          ttsIsActive = true
+          voicePromptJob?.cancel()
+          voicePromptJob = null
+          kwsTtsPlayer.stopVoicePrompt()
+          ttsJob = viewModelScope.launch(Dispatchers.IO) {
+            var paused = false
+            var ttsCompleted = false
+            var chunkIndex = 0
+            try {
+              for (chunk in ttsQueue) {
+                if (!paused) {
+                  Log.d("ZeroClaw", "[tts] stream start — pausing mic")
+                  mic.pauseForTts()
+                  paused = true
+                }
+                Log.d("ZeroClaw", "[tts] playing chunk #${++chunkIndex} isFinal=${chunk.isFinal} format=${chunk.format} b64len=${chunk.audioBase64.length} (~${chunk.audioBase64.length * 3 / 4}B)")
+                runCatching { proxyTtsAudioPlayer.playRaw(chunk.audioBase64, chunk.format) }
+                  .onFailure { Log.w("ZeroClaw", "[tts] playRaw failed on chunk #$chunkIndex", it) }
+                if (chunk.isFinal) { ttsCompleted = true; break }
+              }
+            } finally {
+              ttsIsActive = false
+              if (paused) {
+                if (ttsCompleted) {
+                  Log.d("ZeroClaw", "[tts] stream complete ($chunkIndex chunks)")
+                } else {
+                  Log.d("ZeroClaw", "[tts] stream interrupted after $chunkIndex chunks")
+                }
+                if (ttsCompleted) {
+                  val finalText = pendingAssistantFinalText
+                    ?: _messages.value.lastOrNull { it.role == "assistant" }?.content
+                  if (!finalText.isNullOrBlank()) {
+                    pendingAssistantFinalText = null
+                    mic.onExternalAssistantComplete(finalText)
+                  }
+                }
+                runCatching { mic.resumeAfterTts() }
+              }
+              ttsJob = null
+            }
+          }
+        }
       }
 
       is ZcEvent.ToolCall -> {
         _messages.update {
           it + ZcChatMessage(role = "tool_call", content = "${event.name}(${event.args})")
+        }
+        val toolCallsEnabled = asrPrefs.getBoolean("asr.voiceToolCallsEnabled", true)
+        Log.d("ZeroClaw", "[voice] tool_call '${event.name}' ttsActive=$ttsIsActive promptedToolCalls=$promptedToolCalls")
+        // Voice prompt for tool execution (proxy/TTS mode only, once per round)
+        if (useProxy.value && toolCallsEnabled && !promptedToolCalls && !ttsIsActive) {
+          promptedToolCalls = true
+          Log.d("ZeroClaw", "[voice] → triggering tool-calls prompt")
+          voicePromptJob?.cancel()
+          val gen = kwsTtsPlayer.stopVoicePrompt()
+          voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching { kwsTtsPlayer.playToolCallsSuspend(gen) }
+              .onFailure { Log.w("ZeroClaw", "[voice] tool-calls prompt failed", it) }
+          }
+        } else if (useProxy.value) {
+          Log.d("ZeroClaw", "[voice] → tool-calls prompt skipped (enabled=$toolCallsEnabled alreadyPrompted=$promptedToolCalls ttsActive=$ttsIsActive)")
         }
       }
 
@@ -518,6 +655,13 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
       is ZcEvent.Disconnected -> {
         mic.onGatewayConnectionChanged(false)
+        ttsJob?.cancel()
+        ttsJob = null
+        ttsIsActive = false
+        voicePromptJob?.cancel()
+        voicePromptJob = null
+        kwsTtsPlayer.stopVoicePrompt()
+        viewModelScope.launch(Dispatchers.IO) { proxyTtsAudioPlayer.stop() }
         // Seal any partial streaming bubble so the user can see what arrived
         val sid = streamingMsgId
         if (sid != null) {
@@ -583,6 +727,15 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     val ws = webSocket ?: return
     val content = text.trim()
     if (content.isEmpty() && attachments.isEmpty()) return
+    sawProxyTtsChunkThisTurn = false
+    pendingAssistantFinalText = null
+    pendingCompletionFallbackJob?.cancel()
+    pendingCompletionFallbackJob = null
+    voicePromptJob?.cancel()
+    kwsTtsPlayer.stopVoicePrompt()
+    voicePromptJob = null
+    promptedToolCalls = false
+    ttsIsActive = false
     _messages.update { it + ZcChatMessage(role = "user", content = content, attachments = attachments) }
     val sent = ws.send(buildJsonPayload(content, attachments))
     if (!sent) {
@@ -607,6 +760,10 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     _state.value = ZcState.Idle
     _errorText.value = null
     streamingMsgId = null
+    sawProxyTtsChunkThisTurn = false
+    pendingAssistantFinalText = null
+    pendingCompletionFallbackJob?.cancel()
+    pendingCompletionFallbackJob = null
   }
 
   /** Abort the current streaming response and silently reconnect so the user can keep chatting. */
@@ -660,12 +817,35 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     prefs.edit().remove("token").apply()
   }
 
+  private fun completeAssistantTurn(finalText: String, source: String) {
+    if (useProxy.value) {
+      pendingAssistantFinalText = finalText
+      if (sawProxyTtsChunkThisTurn || ttsIsActive) {
+        Log.d("ZeroClaw", "[voice] completion deferred until final TTS chunk source=$source")
+        return
+      }
+      // Fallback: if this turn has no proxy TTS chunks, finalize on message text.
+      pendingCompletionFallbackJob?.cancel()
+      pendingCompletionFallbackJob = viewModelScope.launch(Dispatchers.IO) {
+        delay(1200L)
+        if (!sawProxyTtsChunkThisTurn) {
+          val text = pendingAssistantFinalText
+          pendingAssistantFinalText = null
+          if (!text.isNullOrBlank()) mic.onExternalAssistantComplete(text)
+        }
+      }
+      return
+    }
+    mic.onExternalAssistantComplete(finalText)
+  }
+
   override fun onCleared() {
     super.onCleared()
     mic.setMicEnabled(false)
     reconnectJob?.cancel()
     webSocket?.cancel()
     webSocket = null
+    viewModelScope.launch(Dispatchers.IO) { proxyTtsAudioPlayer.release() }
     kwsTtsPlayer.release()
   }
 
