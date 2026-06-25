@@ -6,3 +6,4 @@ local.properties
 **/*.iml
 *.log
 otherResources/
+app/src/main/assets/

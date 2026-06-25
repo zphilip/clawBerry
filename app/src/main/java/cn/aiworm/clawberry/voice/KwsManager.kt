@@ -172,8 +172,10 @@ class KwsManager(
         }
 
         val bufferSize = maxOf(minBuf, CHUNK_SAMPLES * 2)  // bytes: 2 bytes per 16-bit sample
+        // VOICE_RECOGNITION applies AGC + noise suppression tuned for speech,
+        // improving KWS sensitivity at normal speaking volumes vs raw MIC.
         val audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -277,8 +279,8 @@ class KwsManager(
             ),
             maxActivePaths = 4,
             keywordsFile = "$MODEL_DIR/keywords.txt",
-            keywordsScore = 2.0f,
-            keywordsThreshold = 0.08f,
+            keywordsScore = 6.0f,
+            keywordsThreshold = 0.04f,
             numTrailingBlanks = 1,
         )
         return KeywordSpotter(assetManager = context.assets, config = config)

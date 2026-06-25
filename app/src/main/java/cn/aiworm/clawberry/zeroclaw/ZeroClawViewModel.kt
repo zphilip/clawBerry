@@ -502,7 +502,39 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
         mic.onGatewayConnectionChanged(true)
       }
 
+      // ── Thinking ─────────────────────────────────────────────────────────
+      is ZcEvent.Thinking -> {
+        // Play thinking-filler prompt whenever no other prompt is active.
+        // promptPlayMutex in KwsTtsPlayer serialises playback so at most one
+        // prompt runs at a time; checking voicePromptJob prevents cancel+restart
+        // storms when chunks arrive in rapid succession.
+        if (useProxy.value && voicePromptJob?.isActive != true && !ttsIsActive) {
+          Log.d("ZeroClaw", "[voice] → triggering thinking prompt (thinking event)")
+          voicePromptJob?.cancel()
+          val gen = kwsTtsPlayer.stopVoicePrompt()
+          voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching { kwsTtsPlayer.playThinkingSuspend(gen) }
+              .onFailure { Log.w("ZeroClaw", "[voice] thinking prompt failed", it) }
+          }
+        }
+        mic.onExternalAssistantDelta(event.content)
+      }
+
+      // ── Chunk ────────────────────────────────────────────────────────────
       is ZcEvent.Chunk -> {
+        // Ongoing audio feedback: re-trigger the thinking prompt when the
+        // previous one has finished, so the user hears periodic reminders
+        // that the agent is still working.
+        if (useProxy.value && voicePromptJob?.isActive != true && !ttsIsActive) {
+          Log.d("ZeroClaw", "[voice] → triggering thinking prompt (chunk)")
+          voicePromptJob?.cancel()
+          val gen = kwsTtsPlayer.stopVoicePrompt()
+          voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching { kwsTtsPlayer.playThinkingSuspend(gen) }
+              .onFailure { Log.w("ZeroClaw", "[voice] thinking prompt failed", it) }
+          }
+        }
+
         val id =
           streamingMsgId
             ?: run {
@@ -522,6 +554,9 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
       }
 
       is ZcEvent.Done -> {
+        // Task-complete voice prompt is handled by the existing completeAssistantTurn
+        // → onExternalAssistantComplete → pendingSpeakRunComplete → resumeKwsAfterResponse
+        // chain (after TTS) or the text-only fallback timer.
         val id = streamingMsgId
         if (id != null) {
           _messages.update { msgs ->
@@ -644,6 +679,23 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
       }
 
       is ZcEvent.Errored -> {
+        // Finalize the voice turn so _isSending is cleared and isPipelineActive
+        // returns false.  Without this, a subsequent startKws() / setMicEnabled(true)
+        // sees isPipelineActive=true and defers KWS start indefinitely.
+        // Mirrors PicoClaw's finalizeAssistantTurnNow(event.message, "error").
+        mic.onExternalAssistantComplete(event.message)
+
+        // Error voice prompt (voice-chat / proxy mode only).
+        // Guard with voicePromptJob?.isActive so rapid-fire error events don't
+        // cancel each other — the first prompt plays to completion and subsequent
+        // errors are silent (the user already heard "任务执行出错了").
+        if (useProxy.value && voicePromptJob?.isActive != true && !ttsIsActive) {
+          voicePromptJob?.cancel()
+          voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching { kwsTtsPlayer.playTextSuspend("${_kwsTitle.value}，任务执行出错了") }
+              .onFailure { Log.w("ZeroClaw", "[voice] error prompt failed", it) }
+          }
+        }
         // Always surface the error so user can see it (not just as a chat bubble)
         _errorText.value = event.message
         if (_state.value == ZcState.Connected) {

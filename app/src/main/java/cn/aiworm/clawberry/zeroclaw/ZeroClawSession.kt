@@ -29,6 +29,9 @@ sealed class ZcEvent {
   /** WebSocket handshake completed. */
   data object Connected : ZcEvent()
 
+  /** Agent thinking/reasoning content (streamed before tool calls or final response). */
+  data class Thinking(val content: String) : ZcEvent()
+
   /** Streaming text chunk from the agent. */
   data class Chunk(val content: String) : ZcEvent()
 
@@ -187,6 +190,9 @@ class ZeroClawSession(private val client: OkHttpClient) {
             val msg = json.parseToJsonElement(text).jsonObject
             val event =
               when (val type = msg["type"]?.jsonPrimitive?.contentOrNull) {
+                "thinking" ->
+                  ZcEvent.Thinking(msg["content"]?.jsonPrimitive?.contentOrNull ?: "")
+
                 "chunk" ->
                   ZcEvent.Chunk(msg["content"]?.jsonPrimitive?.contentOrNull ?: "")
 

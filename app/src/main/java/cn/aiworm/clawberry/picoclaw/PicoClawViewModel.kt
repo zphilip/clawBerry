@@ -368,6 +368,10 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var sawProxyTtsChunkThisTurn = false
     /** True when the current assistant turn was triggered by voice (KWS/ASR) input, not typed text. */
     @Volatile private var lastTurnWasVoice = false
+    /** True once a thinking-filler prompt has been played for the current assistant turn. */
+    @Volatile private var promptedThinking = false
+    /** True once a tool-calls-filler prompt has been played for the current assistant turn. */
+    @Volatile private var promptedToolCalls = false
     /** Final assistant text buffered until proxy TTS reaches isFinal=true. */
     @Volatile private var pendingAssistantFinalText: String? = null
     /** Timeout fallback in case a turn was marked voice but no TTS chunk arrives. */
@@ -504,6 +508,8 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                 kwsTtsPlayer.stopVoicePrompt()
                 voicePromptJob = null
                 ttsIsActive = false
+                promptedThinking = false
+                promptedToolCalls = false
                 Log.d("PicoClaw", "[voice] typing.start — voice state reset")
                 _messages.update { msgs ->
                     if (msgs.none { it.role == "typing" }) {
@@ -548,7 +554,8 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                     Log.d("PicoClaw", "[voice] message.create kind=${kind ?: "(none)"} ttsActive=$ttsIsActive promptJobActive=${voicePromptJob?.isActive}")
                     when (kind) {
                         "thought", "thinking" -> {
-                            if (thinkingEnabled && !ttsIsActive) {
+                            if (thinkingEnabled && !promptedThinking && !ttsIsActive) {
+                                promptedThinking = true
                                 Log.d("PicoClaw", "[voice] → triggering thinking prompt")
                                 voicePromptJob?.cancel()
                                 val gen = kwsTtsPlayer.stopVoicePrompt()
@@ -560,11 +567,12 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                                     }
                                 }
                             } else {
-                                Log.d("PicoClaw", "[voice] → thinking prompt skipped (enabled=$thinkingEnabled ttsActive=$ttsIsActive)")
+                                Log.d("PicoClaw", "[voice] → thinking prompt skipped (enabled=$thinkingEnabled alreadyPrompted=$promptedThinking ttsActive=$ttsIsActive)")
                             }
                         }
                         "tool_calls", "tool-calls" -> {
-                            if (toolCallsEnabled && !ttsIsActive) {
+                            if (toolCallsEnabled && !promptedToolCalls && !ttsIsActive) {
+                                promptedToolCalls = true
                                 Log.d("PicoClaw", "[voice] → triggering tool-calls prompt")
                                 voicePromptJob?.cancel()
                                 val gen = kwsTtsPlayer.stopVoicePrompt()
@@ -576,7 +584,7 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                                     }
                                 }
                             } else {
-                                Log.d("PicoClaw", "[voice] → tool-calls prompt skipped (enabled=$toolCallsEnabled ttsActive=$ttsIsActive)")
+                                Log.d("PicoClaw", "[voice] → tool-calls prompt skipped (enabled=$toolCallsEnabled alreadyPrompted=$promptedToolCalls ttsActive=$ttsIsActive)")
                             }
                         }
                         else -> Log.d("PicoClaw", "[voice] → no prompt for kind=${kind ?: "(none)"}")
@@ -770,6 +778,8 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         pendingCompletionFallbackJob?.cancel()
         pendingCompletionFallbackJob = null
         ttsIsActive = false
+        promptedThinking = false
+        promptedToolCalls = false
         Log.d("PicoClaw", "[voice] sendMessage — voice state reset (voice=$isVoiceInitiated)")
         _messages.update { it + PcChatMessage(role = "user", content = content, attachments = attachments) }
         val counter = msgCounter.incrementAndGet()

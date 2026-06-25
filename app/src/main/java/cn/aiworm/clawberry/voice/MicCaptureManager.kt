@@ -477,22 +477,19 @@ class MicCaptureManager(
     // indefinitely and eventually fire onFinal("") / onEndOfSpeech, which
     // would trigger a spurious retry ("请再说一遍你的指令") or no-input prompt.
     if (kwsEnabled() && ttsPauseDepth == 0) {
-      // Process any KWS activation that was queued during TTS playback first —
-      // activatePendingKwsSession() pauses KWS and starts ASR, so KWS resume
-      // is not needed (and would be immediately paused again).
+      Log.i(tag, "★★ resumeAfterTts KWS branch: kwsPendingActivation=$kwsPendingActivation micEnabled=${_micEnabled.value} kwsResumePending=$kwsResumePending")
       if (kwsPendingActivation) {
+        Log.i(tag, "★★ → activatePendingKwsSession")
         kwsPendingActivation = false
         kwsResumePending = false
         activatePendingKwsSession()
         return
       }
-      // Play deferred speakRunComplete success phrase (if set), then resume KWS.
-      // This ensures KWS isn't running while TTS audio is still coming out of the
-      // speaker — eliminating the false-trigger path that caused spurious
-      // "请再说一遍你的指令" / "没有听到你的指令" prompts.
       if (_micEnabled.value) {
+        Log.i(tag, "★★ → resumeKwsAfterResponse")
         resumeKwsAfterResponse()
       } else {
+        Log.i(tag, "★★ → mic disabled, clearing flags without KWS resume")
         kwsResumePending = false
         pendingSpeakRunComplete = false
       }
@@ -764,18 +761,26 @@ class MicCaptureManager(
       lastKnownMic.set(this)
       globalMicEnabled.value = true
       _statusText.value = "Listening for wake word…"
-      // Do NOT resume KWS here — speakCommandAck / voice prompts may still be playing
-      // through the speaker, and the keyword spotter would capture that TTS audio and
-      // false-trigger.  Instead, set a flag so KWS is resumed later by resumeAfterTts()
-      // (proxy-TTS path) or onExternalAssistantComplete() / completePendingTurn()
-      // (text-only fallback path), after ALL response audio has finished.
+      // Do NOT resume KWS immediately — speakCommandAck / voice prompts may still
+      // be playing through the speaker and the keyword spotter would capture that
+      // TTS audio and false-trigger.  For the gateway-response path (proxy TTS /
+      // text-only), KWS is resumed later by resumeAfterTts() or onExternalAssistant-
+      // Complete().  For the retry / no-input path there is no gateway response, so
+      // we resume KWS as soon as the post-session TTS audio finishes.
       kwsResumePending = true
-      // Still join any in-flight post-session TTS (retry/noinput) so its audio can
-      // complete before the KWS AudioRecord is re-opened later.
       val ttsJob = kwsPostSessionTtsJob.also { kwsPostSessionTtsJob = null }
       if (ttsJob != null) {
         scope.launch(Dispatchers.IO) {
           ttsJob.join()
+          // Retry / no-input audio finished and there will be no gateway response
+          // to trigger resumeAfterTts() — resume KWS now so the user can try again.
+          if (kwsResumePending) {
+            kwsResumePending = false
+            _statusText.value = "Listening for wake word…"
+            lastKnownMic.set(this@MicCaptureManager)
+            globalMicEnabled.value = true
+            kws?.resume()
+          }
         }
       }
       return
