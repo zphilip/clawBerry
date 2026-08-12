@@ -53,6 +53,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
@@ -122,6 +123,7 @@ fun GatewayVoiceTab(
     kwsEnabled: Boolean = false,
     onSetKwsEnabled: ((Boolean) -> Unit)? = null,
     onSetMicEnabled: (Boolean) -> Unit,
+    onReplayAudio: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -227,7 +229,7 @@ fun GatewayVoiceTab(
             }
 
             items(items = conversation, key = { it.id }) { entry ->
-                GatewayVoiceTurnBubble(entry = entry)
+                GatewayVoiceTurnBubble(entry = entry, onReplayAudio = onReplayAudio)
             }
 
             if (showThinkingBubble) {
@@ -528,7 +530,10 @@ private fun GatewayThinkingDot(alpha: Float, color: Color) {
 }
 
 @Composable
-private fun GatewayVoiceTurnBubble(entry: VoiceConversationEntry) {
+private fun GatewayVoiceTurnBubble(
+    entry: VoiceConversationEntry,
+    onReplayAudio: ((String) -> Unit)? = null,
+) {
     val isUser = entry.role == VoiceConversationRole.User
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -554,6 +559,16 @@ private fun GatewayVoiceTurnBubble(entry: VoiceConversationEntry) {
                     style = mobileBody,
                     color = mobileText,
                 )
+                // Replay button for cached TTS audio
+                if (!isUser && entry.cachedAudioDir != null && onReplayAudio != null) {
+                    Text(
+                        text = "🔊",
+                        style = mobileCaption1,
+                        modifier = Modifier
+                            .clickable { onReplayAudio(entry.cachedAudioDir) }
+                            .padding(top = 4.dp),
+                    )
+                }
             }
         }
     }

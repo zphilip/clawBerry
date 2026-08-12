@@ -240,6 +240,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                     onRefresh = viewModel::regenerateLastMessage,
                     onStop = viewModel::stopStreaming,
                     onGoConnect = { activeTab = PcTab.Connect },
+                    onReplayTts = { viewModel.replayTtsAudio(it) },
                 )
                 PcTab.Voice ->
                     GatewayVoiceTab(
@@ -263,6 +264,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                         kwsEnabled = kwsEnabled,
                         onSetKwsEnabled = viewModel::setKwsEnabled,
                         onSetMicEnabled = viewModel::setMicEnabled,
+                        onReplayAudio = { viewModel.replayTtsAudioDir(it) },
                     )
                 PcTab.Settings -> PcSettingsTab(
                     host = host,
@@ -1147,6 +1149,7 @@ private fun PcChatTab(
     onRefresh: () -> Unit,
     onStop: () -> Unit,
     onGoConnect: () -> Unit,
+    onReplayTts: (PcChatMessage) -> Unit = {},
 ) {
     if (!isConnected) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1200,7 +1203,7 @@ private fun PcChatTab(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(messages, key = { it.id }) { msg ->
-                PcMessageBubble(msg = msg, onImageClick = onImageClick)
+                PcMessageBubble(msg = msg, onImageClick = onImageClick, onReplayTts = onReplayTts)
             }
         }
         HorizontalDivider(color = mobileBorder, thickness = 0.5.dp)
@@ -1229,7 +1232,11 @@ private fun PcChatTab(
 // Message bubble
 // ---------------------------------------------------------------------------
 @Composable
-private fun PcMessageBubble(msg: PcChatMessage, onImageClick: (String, String?) -> Unit) {
+private fun PcMessageBubble(
+    msg: PcChatMessage,
+    onImageClick: (String, String?) -> Unit,
+    onReplayTts: (PcChatMessage) -> Unit = {},
+) {
     when (msg.role) {
         "user" -> {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1257,12 +1264,28 @@ private fun PcMessageBubble(msg: PcChatMessage, onImageClick: (String, String?) 
                     color = mobileCardSurface,
                     border = BorderStroke(1.dp, mobileBorder),
                 ) {
-                    Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                         ChatMarkdown(
                             text = msg.content,
                             textColor = mobileText,
                             onImageClick = onImageClick,
                         )
+                        // Replay button for cached TTS audio
+                        if (msg.cachedAudioDir != null) {
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                Text(
+                                    text = "🔊",
+                                    style = mobileCaption1,
+                                    modifier = Modifier
+                                        .clickable { onReplayTts(msg) }
+                                        .padding(4.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -31,6 +32,8 @@ data class VoiceConversationEntry(
   val role: VoiceConversationRole,
   val text: String,
   val isStreaming: Boolean = false,
+  /** Non-null when cached TTS audio is available for replay. */
+  val cachedAudioDir: String? = null,
 )
 
 class MicCaptureManager(
@@ -963,6 +966,19 @@ class MicCaptureManager(
   }
 
   /**
+   * Attach a cached TTS replay path to the most recent assistant voice entry.
+   * Called from the ViewModel after [TtsAudioCache.finishTurn].
+   */
+  fun setLastAssistantAudioDir(audioDir: String) {
+    val current = _conversation.value
+    val lastIdx = current.indexOfLast { it.role == VoiceConversationRole.Assistant }
+    if (lastIdx < 0) return
+    val updated = current.toMutableList()
+    updated[lastIdx] = updated[lastIdx].copy(cachedAudioDir = audioDir)
+    _conversation.value = updated
+  }
+
+  /**
    * Call when the external gateway signals the assistant turn is complete.
    * [fullText] is the final accumulated reply — pass empty string to finalize
    * whatever partial text was already shown.
@@ -1003,13 +1019,17 @@ class MicCaptureManager(
       try { speakRunComplete?.invoke() }
       catch (e: Throwable) { Log.w(tag, "speakRunComplete (deferred) failed: ${e.message}") }
     }
-    // Small delay to let Android audio routing settle after success phrase
-    delay(200L)
-    _statusText.value = "Listening for wake word…"
-    lastKnownMic.set(this)
-    globalMicEnabled.value = true
-    Log.d(tag, "resumeKwsAfterResponse → resuming KWS")
-    kws?.resume()
+    // Resume KWS in a NonCancellable block so the resume survives
+    // ttsJob cancellation (e.g. user stops playback mid-stream).
+    withContext(NonCancellable) {
+      // Small delay to let Android audio routing settle after success phrase
+      delay(200L)
+      _statusText.value = "Listening for wake word…"
+      lastKnownMic.set(this@MicCaptureManager)
+      globalMicEnabled.value = true
+      Log.d(tag, "resumeKwsAfterResponse → resuming KWS")
+      kws?.resume()
+    }
   }
 
   // ---------------------------------------------------------------------------

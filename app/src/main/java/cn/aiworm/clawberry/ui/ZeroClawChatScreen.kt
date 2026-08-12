@@ -227,6 +227,7 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                         onRefresh = { viewModel.regenerateLastMessage() },
                         onStop = { viewModel.stopStreaming() },
                         onGoConnect = { activeTab = ZcTab.Connect },
+                        onReplayTts = { viewModel.replayTtsAudio(it) },
                     )
 
                 ZcTab.Voice ->
@@ -251,6 +252,7 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                         kwsEnabled = kwsEnabled,
                         onSetKwsEnabled = viewModel::setKwsEnabled,
                         onSetMicEnabled = { viewModel.setMicEnabled(it) },
+                        onReplayAudio = { viewModel.replayTtsAudioDir(it) },
                     )
 
                 ZcTab.Settings ->
@@ -1011,6 +1013,7 @@ private fun ZcChatTab(
     onRefresh: () -> Unit,
     onStop: () -> Unit,
     onGoConnect: () -> Unit,
+    onReplayTts: (ZcChatMessage) -> Unit = {},
 ) {
     if (!isConnected) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1084,7 +1087,7 @@ private fun ZcChatTab(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(items = messages, key = { it.id }) { msg -> ZcMessageBubble(msg) }
+            items(items = messages, key = { it.id }) { msg -> ZcMessageBubble(msg, onReplayTts) }
         }
 
         HorizontalDivider(color = mobileBorder, thickness = 1.dp)
@@ -1603,7 +1606,10 @@ private fun extractHtmlFromToolCallArgs(content: String): String? {
 // Message bubble – user / assistant / tool_call / tool_result / system_error
 // ---------------------------------------------------------------------------
 @Composable
-private fun ZcMessageBubble(msg: ZcChatMessage) {
+private fun ZcMessageBubble(
+    msg: ZcChatMessage,
+    onReplayTts: (ZcChatMessage) -> Unit = {},
+) {
     val isUser = msg.role == "user"
     val isTool = msg.role == "tool_call" || msg.role == "tool_result"
     val isError = msg.role == "system_error"
@@ -1775,6 +1781,22 @@ private fun ZcMessageBubble(msg: ZcChatMessage) {
                             textColor = mobileText,
                             onImageClick = onImageClick,
                         )
+                        // Replay button for cached TTS audio
+                        if (msg.cachedAudioDir != null) {
+                            Spacer(Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                Text(
+                                    text = "🔊",
+                                    style = mobileCaption1,
+                                    modifier = Modifier
+                                        .clickable { onReplayTts(msg) }
+                                        .padding(4.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

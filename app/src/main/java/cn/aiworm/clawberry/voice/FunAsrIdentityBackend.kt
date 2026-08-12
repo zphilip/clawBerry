@@ -55,7 +55,7 @@ class FunAsrIdentityBackend(
 
     companion object {
         const val BASE_URL = "http://apicn.aiworm.cn:8811"
-        const val DEFAULT_THRESHOLD = 0.45f
+        const val DEFAULT_THRESHOLD = 0.25f
         /** Default no-speech timeout; use a shorter value for KWS sessions. */
         const val SPEECH_TIMEOUT_MS = 20_000L
 
@@ -64,8 +64,8 @@ class FunAsrIdentityBackend(
         // 60 ms of audio per chunk (same stride as FunAsrBackend)
         private const val AUDIO_STRIDE = 1_920
 
-        // Energy-based VAD thresholds — copied from FunAsrBackend
-        private const val SILENCE_THRESHOLD = 200.0      // linear RMS
+        // Energy-based VAD — lowered for quiet-speech sensitivity
+        private const val SILENCE_THRESHOLD = 80.0       // linear RMS (was 200)
         private const val SILENCE_FINAL_MS = 1_500L      // ms of silence → end of utterance
         private const val STARTUP_IGNORE_MS = 400L       // ignore energy bursts right after start
     }
@@ -222,7 +222,10 @@ class FunAsrIdentityBackend(
 
         // Upload to server
         toneOf().startTone(ToneGenerator.TONE_PROP_BEEP2, 220)
-        val pcm = pcmBuffer.toByteArray()
+        val rawPcm = pcmBuffer.toByteArray()
+        // Apply 2× digital gain before encoding to WAV — compensates for
+        // quiet speech and improves speaker-verification similarity scores.
+        val pcm = applyGain(rawPcm, 2.0f)
         val wav = pcmToWav(pcm, SAMPLE_RATE)
 
         val transcript = runCatching {
@@ -272,6 +275,23 @@ class FunAsrIdentityBackend(
     private fun toneOf() = toneGen
         ?: ToneGenerator(AudioManager.STREAM_NOTIFICATION, ToneGenerator.MAX_VOLUME)
             .also { toneGen = it }
+
+    /**
+     * Multiply each 16-bit PCM sample by [factor], clamping to [-32768, 32767].
+     * Returns a new byte array with the same little-endian layout.
+     */
+    private fun applyGain(pcm: ByteArray, factor: Float): ByteArray {
+        val out = ByteArray(pcm.size)
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val s = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort().toInt()
+            val gained = (s * factor).toInt().coerceIn(-32768, 32767)
+            out[i] = (gained and 0xFF).toByte()
+            out[i + 1] = ((gained shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        return out
+    }
 
     private fun computeLinearRms(buf: ByteArray, len: Int): Double {
         var sumSq = 0.0

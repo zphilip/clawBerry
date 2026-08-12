@@ -2,6 +2,7 @@
 
 import android.app.Application
 import android.content.Context
+import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -13,9 +14,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import clawberry.aiworm.cn.voice.TtsAudioCache
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import android.util.Log
 import clawberry.aiworm.cn.voice.KwsManager
@@ -54,6 +57,8 @@ data class ZcChatMessage(
   val content: String,
   val isStreaming: Boolean = false,
   val attachments: List<ZcImageAttachment> = emptyList(),
+  /** Non-null when cached TTS audio is available for replay. */
+  val cachedAudioDir: String? = null,
 )
 
 // ---------------------------------------------------------------------------
@@ -186,6 +191,10 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   // TTS streaming queue — serialises back-to-back chunks for gapless playback
   private val ttsQueue = Channel<ZcEvent.TtsAudio>(Channel.UNLIMITED)
   @Volatile private var ttsJob: Job? = null
+  // TTS audio cache for replay
+  private val ttsCache = TtsAudioCache(app.applicationContext)
+  private var ttsCacheDir: File? = null
+  private var ttsCacheTurnId: String? = null
   private val mic: MicCaptureManager = MicCaptureManager(
     context = app.applicationContext,
     scope = viewModelScope,
@@ -334,6 +343,10 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   @Volatile private var promptedToolCalls = false
   /** Tracks the active voice-prompt coroutine so a new prompt can cancel the previous one. */
   private var voicePromptJob: Job? = null
+  /** Timestamp (elapsedRealtime) when the last voice prompt started. Used for cooldown. */
+  @Volatile private var lastPromptStartedMs = 0L
+  /** Minimum ms between consecutive voice-prompt starts to prevent AudioTrack thrashing. */
+  private val promptCooldownMs = 5000L
   /** True while TTS stream is actively playing; blocks late voice-prompt triggers. */
   @Volatile private var ttsIsActive = false
   /** True once at least one proxy TTS chunk was seen for the current assistant turn. */
@@ -504,17 +517,17 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
       // ── Thinking ─────────────────────────────────────────────────────────
       is ZcEvent.Thinking -> {
-        // Play thinking-filler prompt whenever no other prompt is active.
-        // promptPlayMutex in KwsTtsPlayer serialises playback so at most one
-        // prompt runs at a time; checking voicePromptJob prevents cancel+restart
-        // storms when chunks arrive in rapid succession.
         if (useProxy.value && voicePromptJob?.isActive != true && !ttsIsActive) {
-          Log.d("ZeroClaw", "[voice] → triggering thinking prompt (thinking event)")
-          voicePromptJob?.cancel()
-          val gen = kwsTtsPlayer.stopVoicePrompt()
-          voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
-            runCatching { kwsTtsPlayer.playThinkingSuspend(gen) }
-              .onFailure { Log.w("ZeroClaw", "[voice] thinking prompt failed", it) }
+          val now = android.os.SystemClock.elapsedRealtime()
+          if (now - lastPromptStartedMs >= promptCooldownMs) {
+            lastPromptStartedMs = now
+            Log.d("ZeroClaw", "[voice] → triggering thinking prompt (thinking event)")
+            voicePromptJob?.cancel()
+            val gen = kwsTtsPlayer.stopVoicePrompt()
+            voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+              runCatching { kwsTtsPlayer.playThinkingSuspend(gen) }
+                .onFailure { Log.w("ZeroClaw", "[voice] thinking prompt failed", it) }
+            }
           }
         }
         mic.onExternalAssistantDelta(event.content)
@@ -522,16 +535,17 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
 
       // ── Chunk ────────────────────────────────────────────────────────────
       is ZcEvent.Chunk -> {
-        // Ongoing audio feedback: re-trigger the thinking prompt when the
-        // previous one has finished, so the user hears periodic reminders
-        // that the agent is still working.
         if (useProxy.value && voicePromptJob?.isActive != true && !ttsIsActive) {
-          Log.d("ZeroClaw", "[voice] → triggering thinking prompt (chunk)")
-          voicePromptJob?.cancel()
-          val gen = kwsTtsPlayer.stopVoicePrompt()
-          voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
-            runCatching { kwsTtsPlayer.playThinkingSuspend(gen) }
-              .onFailure { Log.w("ZeroClaw", "[voice] thinking prompt failed", it) }
+          val now = android.os.SystemClock.elapsedRealtime()
+          if (now - lastPromptStartedMs >= promptCooldownMs) {
+            lastPromptStartedMs = now
+            Log.d("ZeroClaw", "[voice] → triggering thinking prompt (chunk)")
+            voicePromptJob?.cancel()
+            val gen = kwsTtsPlayer.stopVoicePrompt()
+            voicePromptJob = viewModelScope.launch(Dispatchers.IO) {
+              runCatching { kwsTtsPlayer.playThinkingSuspend(gen) }
+                .onFailure { Log.w("ZeroClaw", "[voice] thinking prompt failed", it) }
+            }
           }
         }
 
@@ -608,16 +622,32 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
             var paused = false
             var ttsCompleted = false
             var chunkIndex = 0
+            // ── Cache setup ────────────────────────────────────────────
+            val turnId = java.util.UUID.randomUUID().toString()
+            ttsCacheTurnId = turnId
+            ttsCache.evictOldest(20)
             try {
               for (chunk in ttsQueue) {
                 if (!paused) {
                   Log.d("ZeroClaw", "[tts] stream start — pausing mic")
                   mic.pauseForTts()
+                  // First chunk initialises the cache directory
+                  ttsCacheDir = ttsCache.beginTurn(turnId, chunk.format ?: "wav")
                   paused = true
                 }
                 Log.d("ZeroClaw", "[tts] playing chunk #${++chunkIndex} isFinal=${chunk.isFinal} format=${chunk.format} b64len=${chunk.audioBase64.length} (~${chunk.audioBase64.length * 3 / 4}B)")
                 runCatching { proxyTtsAudioPlayer.playRaw(chunk.audioBase64, chunk.format) }
                   .onFailure { Log.w("ZeroClaw", "[tts] playRaw failed on chunk #$chunkIndex", it) }
+                // ── Save chunk to cache ─────────────────────────────────
+                val dir = ttsCacheDir
+                if (dir != null) {
+                  try {
+                    ttsCache.writeChunk(dir, chunkIndex - 1,
+                      Base64.decode(chunk.audioBase64, Base64.DEFAULT))
+                  } catch (e: Exception) {
+                    Log.w("ZeroClaw", "[tts] cache write failed on chunk #$chunkIndex", e)
+                  }
+                }
                 if (chunk.isFinal) { ttsCompleted = true; break }
               }
             } finally {
@@ -627,6 +657,8 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
                   Log.d("ZeroClaw", "[tts] stream complete ($chunkIndex chunks)")
                 } else {
                   Log.d("ZeroClaw", "[tts] stream interrupted after $chunkIndex chunks")
+                  // ── Clean up partial cache ────────────────────────────
+                  ttsCacheTurnId?.let { ttsCache.deleteTurn(it) }
                 }
                 if (ttsCompleted) {
                   val finalText = pendingAssistantFinalText
@@ -635,9 +667,26 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
                     pendingAssistantFinalText = null
                     mic.onExternalAssistantComplete(finalText)
                   }
+                  // ── Finalise cache + associate with assistant message ──
+                  // Must be AFTER onExternalAssistantComplete so the voice
+                  // conversation entry it creates/updates is the last one.
+                  ttsCacheDir?.let { d ->
+                    val audioDir = ttsCache.finishTurn(d, chunkIndex)
+                    _messages.update { msgs ->
+                      val lastIdx = msgs.indexOfLast { it.role == "assistant" }
+                      if (lastIdx >= 0) {
+                        msgs.toMutableList().also {
+                          it[lastIdx] = it[lastIdx].copy(cachedAudioDir = audioDir)
+                        }
+                      } else msgs
+                    }
+                    mic.setLastAssistantAudioDir(audioDir)
+                  }
                 }
                 runCatching { mic.resumeAfterTts() }
               }
+              ttsCacheDir = null
+              ttsCacheTurnId = null
               ttsJob = null
             }
           }
@@ -773,6 +822,32 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   // ---------------------------------------------------------------------------
+  // TTS replay
+  // ---------------------------------------------------------------------------
+
+  /** Replay cached TTS audio for a chat message. */
+  fun replayTtsAudio(message: ZcChatMessage) {
+    replayTtsAudioDir(message.cachedAudioDir ?: return)
+  }
+
+  /** Replay cached TTS audio by directory path (for voice tab UI). */
+  fun replayTtsAudioDir(dir: String) {
+    val (format, chunkCount) = ttsCache.readMeta(dir) ?: return
+    if (chunkCount <= 0) return
+    ttsJob?.cancel()
+    ttsJob = viewModelScope.launch(Dispatchers.IO) {
+      try {
+        for (i in 0 until chunkCount) {
+          if (ttsJob?.isActive != true) break
+          val base64 = ttsCache.readChunkBase64(dir, i) ?: continue
+          proxyTtsAudioPlayer.playRaw(base64, format)
+        }
+      } catch (_: java.util.concurrent.CancellationException) { }
+      ttsJob = null
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Send user message
   // ---------------------------------------------------------------------------
   fun sendMessage(text: String, attachments: List<ZcImageAttachment> = emptyList()) {
@@ -787,7 +862,11 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     kwsTtsPlayer.stopVoicePrompt()
     voicePromptJob = null
     promptedToolCalls = false
+    lastPromptStartedMs = 0L
     ttsIsActive = false
+    // Cancel in-progress cache (new turn starting)
+    ttsCacheDir = null
+    ttsCacheTurnId = null
     _messages.update { it + ZcChatMessage(role = "user", content = content, attachments = attachments) }
     val sent = ws.send(buildJsonPayload(content, attachments))
     if (!sent) {

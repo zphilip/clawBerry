@@ -131,10 +131,11 @@
     <string name="zc_pair_and_connect">配对并连接</string>
     <string name="zc_connect_gateway">连接网关</string>
     <string name="zc_gateway">网关</string>
-    <string name="zc_bearer_token_optional">Bearer 令牌（可选 – 跳过配对）</string>    <string name="zc_via_proxy">經由 ClawProxy</string>
-    <string name="zc_via_proxy_subtitle">無需令牌或配對 · 端口 18780</string>
+    <string name="zc_bearer_token_optional">Bearer 令牌（可选 – 跳过配对）</string>
+    <string name="zc_via_proxy">经由 ClawProxy</string>
+    <string name="zc_via_proxy_subtitle">无需令牌或配对 · 端口 18780</string>
     <string name="zc_proxy_port">代理端口</string>
-    <string name="zc_connect_via_proxy">經由代理連接</string>
+    <string name="zc_connect_via_proxy">经由代理连接</string>
     <!-- ZeroClaw Info card -->
     <string name="zc_state_connected">已连接</string>
     <string name="zc_token">令牌</string>
@@ -190,8 +191,9 @@
     <string name="pc_mode_web_backend">网页后端</string>
     <string name="pc_mode_direct_label">直连</string>
     <string name="pc_mode_web_port">端口 18800</string>
-    <string name="pc_mode_direct_port">端口 18790</string>    <string name="pc_mode_proxy_label">經由代理</string>
-    <string name="pc_mode_proxy_port">端口 18780 · 無需令牌</string>
+    <string name="pc_mode_direct_port">端口 18790</string>
+    <string name="pc_mode_proxy_label">经由代理</string>
+    <string name="pc_mode_proxy_port">端口 18780 · 无需令牌</string>
     <string name="pc_mode_proxy">代理</string>    <string name="pc_connection_mode">连接模式</string>
 
     <!-- PicoClaw Setup form -->
@@ -300,11 +302,11 @@
     <string name="asr_mic_start">语音输入</string>
     <string name="asr_recording">录音中…</string>
     <string name="asr_transcribing">转录中…</string>
-    <string name="asr_failed">語音輸入失敗</string>
-    <string name="asr_cancel">取消語音</string>
-    <string name="asr_success">文字已填入輸入框，點擊發送即可</string>
-    <string name="asr_failed_message">語音識別失敗，請點擊麥克風重試</string>
-    <string name="asr_no_voice">未偵測到聲音</string>
+    <string name="asr_failed">语音输入失败</string>
+    <string name="asr_cancel">取消语音</string>
+    <string name="asr_success">文字已填入输入框，点击发送即可</string>
+    <string name="asr_failed_message">语音识别失败，请点击麦克风重试</string>
+    <string name="asr_no_voice">未检测到声音</string>
 
     <!-- Onboarding Flow -->
     <string name="onboarding_mobile_setup">移动端设置</string>
@@ -377,6 +379,6 @@
     <string name="onboarding_review_failed_msg">复制此报告并发送给您的 Claw。</string>
     <string name="onboarding_review_error_label">错误</string>
     <string name="onboarding_review_copy_report">复制 Claw 报告</string>
-    <string name="onboarding_review_tap_connect_again">此畫面保持開啟時，OpenClaw 會自動重試連線。</string>
+    <string name="onboarding_review_tap_connect_again">此画面保持开启时，OpenClaw 会自动重试连接。</string>
     <string name="onboarding_review_android_version">OpenClaw Android %1$s</string>
 </resources>

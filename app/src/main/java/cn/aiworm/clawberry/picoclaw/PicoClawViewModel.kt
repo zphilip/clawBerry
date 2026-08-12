@@ -2,6 +2,7 @@
 
 import android.app.Application
 import android.content.Context
+import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import clawberry.aiworm.cn.voice.TtsAudioCache
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
@@ -63,6 +65,8 @@ data class PcChatMessage(
     /** Server-assigned message_id for in-place message.update tracking */
     val serverMessageId: String? = null,
     val attachments: List<PcImageAttachment> = emptyList(),
+    /** Non-null when cached TTS audio is available for replay. */
+    val cachedAudioDir: String? = null,
 )
 
 // ---------------------------------------------------------------------------
@@ -197,6 +201,10 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
     // TTS streaming queue — serialises back-to-back chunks for gapless playback
     private val ttsQueue = Channel<PcEvent.TtsAudio>(Channel.UNLIMITED)
     @Volatile private var ttsJob: Job? = null
+    // TTS audio cache for replay
+    private val ttsCache = TtsAudioCache(app.applicationContext)
+    private var ttsCacheDir: java.io.File? = null
+    private var ttsCacheTurnId: String? = null
     private val mic: MicCaptureManager = MicCaptureManager(
         context = app.applicationContext,
         scope = viewModelScope,
@@ -644,16 +652,32 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                         var paused = false
                         var ttsCompleted = false
                         var chunkIndex = 0
+                        // ── Cache setup ────────────────────────────────
+                        val turnId = java.util.UUID.randomUUID().toString()
+                        ttsCacheTurnId = turnId
+                        ttsCache.evictOldest(20)
                         try {
                             for (chunk in ttsQueue) {
                                 if (!paused) {
                                     Log.d("PicoClaw", "[tts] stream start — pausing mic")
                                     mic.pauseForTts()
+                                    // First chunk initialises the cache directory
+                                    ttsCacheDir = ttsCache.beginTurn(turnId, chunk.format ?: "wav")
                                     paused = true
                                 }
                                 Log.d("PicoClaw", "[tts] playing chunk #${++chunkIndex} isFinal=${chunk.isFinal} format=${chunk.format} b64len=${chunk.audioBase64.length} (~${chunk.audioBase64.length * 3 / 4}B)")
                                 runCatching { proxyTtsAudioPlayer.playRaw(chunk.audioBase64, chunk.format) }
                                     .onFailure { Log.w("PicoClaw", "[tts] playRaw failed on chunk #$chunkIndex", it) }
+                                // ── Save chunk to cache ─────────────────
+                                val dir = ttsCacheDir
+                                if (dir != null) {
+                                    try {
+                                        ttsCache.writeChunk(dir, chunkIndex - 1,
+                                            Base64.decode(chunk.audioBase64, Base64.DEFAULT))
+                                    } catch (e: Exception) {
+                                        Log.w("PicoClaw", "[tts] cache write failed on chunk #$chunkIndex", e)
+                                    }
+                                }
                                 if (chunk.isFinal) { ttsCompleted = true; break }
                             }
                         } finally {
@@ -663,6 +687,8 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                                     Log.d("PicoClaw", "[tts] stream complete ($chunkIndex chunks)")
                                 } else {
                                     Log.d("PicoClaw", "[tts] stream interrupted after $chunkIndex chunks")
+                                    // ── Clean up partial cache ───────────
+                                    ttsCacheTurnId?.let { ttsCache.deleteTurn(it) }
                                 }
                                 if (ttsCompleted) {
                                     val finalText = pendingAssistantFinalText
@@ -673,9 +699,26 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                                     if (!finalText.isNullOrBlank()) {
                                         finalizeAssistantTurnNow(finalText, "tts-final")
                                     }
+                                    // ── Finalise cache + associate ──────────
+                                    // Must be AFTER onExternalAssistantComplete so the
+                                    // voice entry it creates/updates is the last one.
+                                    ttsCacheDir?.let { d ->
+                                        val audioDir = ttsCache.finishTurn(d, chunkIndex)
+                                        _messages.update { msgs ->
+                                            val lastIdx = msgs.indexOfLast { it.role == "assistant" }
+                                            if (lastIdx >= 0) {
+                                                msgs.toMutableList().also {
+                                                    it[lastIdx] = it[lastIdx].copy(cachedAudioDir = audioDir)
+                                                }
+                                            } else msgs
+                                        }
+                                        mic.setLastAssistantAudioDir(audioDir)
+                                    }
                                 }
                                 runCatching { mic.resumeAfterTts() }
                             }
+                            ttsCacheDir = null
+                            ttsCacheTurnId = null
                             ttsJob = null
                         }
                     }
@@ -763,6 +806,27 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         Log.d("PicoClaw", "[voice] assistant turn finalized reason=$reason")
     }
 
+    // ── TTS replay ──────────────────────────────────────────────────────────
+    fun replayTtsAudio(message: PcChatMessage) {
+        replayTtsAudioDir(message.cachedAudioDir ?: return)
+    }
+
+    fun replayTtsAudioDir(dir: String) {
+        val (format, chunkCount) = ttsCache.readMeta(dir) ?: return
+        if (chunkCount <= 0) return
+        ttsJob?.cancel()
+        ttsJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                for (i in 0 until chunkCount) {
+                    if (ttsJob?.isActive != true) break
+                    val base64 = ttsCache.readChunkBase64(dir, i) ?: continue
+                    proxyTtsAudioPlayer.playRaw(base64, format)
+                }
+            } catch (_: java.util.concurrent.CancellationException) { }
+            ttsJob = null
+        }
+    }
+
     // ── Send ──────────────────────────────────────────────────────────────────
     fun sendMessage(text: String, attachments: List<PcImageAttachment> = emptyList(), isVoiceInitiated: Boolean = false) {
         val ws = webSocket ?: return
@@ -780,6 +844,9 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         ttsIsActive = false
         promptedThinking = false
         promptedToolCalls = false
+        // Cancel in-progress cache (new turn starting)
+        ttsCacheDir = null
+        ttsCacheTurnId = null
         Log.d("PicoClaw", "[voice] sendMessage — voice state reset (voice=$isVoiceInitiated)")
         _messages.update { it + PcChatMessage(role = "user", content = content, attachments = attachments) }
         val counter = msgCounter.incrementAndGet()
