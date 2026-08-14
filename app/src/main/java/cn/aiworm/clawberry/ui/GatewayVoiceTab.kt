@@ -11,11 +11,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,11 +44,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +65,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -124,6 +137,8 @@ fun GatewayVoiceTab(
     onSetKwsEnabled: ((Boolean) -> Unit)? = null,
     onSetMicEnabled: (Boolean) -> Unit,
     onReplayAudio: ((String) -> Unit)? = null,
+    isTtsPlaying: Boolean = false,
+    onStopTts: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -256,6 +271,67 @@ fun GatewayVoiceTab(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                         style = mobileCallout,
                         color = mobileText,
+                    )
+                }
+            }
+
+            // TTS playing indicator / stop button — three animated equalizer bars
+            if (isTtsPlaying && onStopTts != null) {
+                val infiniteTransition = rememberInfiniteTransition(label = "ttsEqualizer")
+                // Each bar runs the same animation with a staggered start delay
+                // so the peaks ripple from left to right.
+                @Composable fun animatedBar(label: String, delayMs: Int) =
+                    infiniteTransition.animateFloat(
+                        initialValue = 0.2f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500, delayMs),
+                            repeatMode = RepeatMode.Reverse,
+                        ),
+                        label = label,
+                    )
+                val bar1 by animatedBar("bar1", 0)
+                val bar2 by animatedBar("bar2", 120)
+                val bar3 by animatedBar("bar3", 240)
+                val barFractions = listOf(bar1, bar2, bar3)
+                // Resolve composable colors once outside the Canvas lambda
+                val accentColor = mobileAccent
+                val accentSoft = mobileAccentSoft
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    IconButton(
+                        onClick = onStopTts,
+                        modifier = Modifier.size(48.dp),
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = accentSoft,
+                        ),
+                    ) {
+                        Canvas(
+                            modifier = Modifier.size(18.dp, 22.dp),
+                        ) {
+                            val barWidth = size.width * 0.22f
+                            val gap = (size.width - barWidth * 3) / 2
+                            val maxHeight = size.height
+                            val radius = CornerRadius(barWidth / 2, barWidth / 2)
+                            for ((i, fraction) in barFractions.withIndex()) {
+                                val barHeight = maxHeight * (0.25f + 0.75f * fraction)
+                                val x = i * (barWidth + gap)
+                                val y = maxHeight - barHeight
+                                drawRoundRect(
+                                    color = accentColor,
+                                    topLeft = Offset(x, y),
+                                    size = Size(barWidth, barHeight),
+                                    cornerRadius = radius,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.voice_tts_speaking),
+                        style = mobileCaption2,
+                        color = accentColor,
                     )
                 }
             }

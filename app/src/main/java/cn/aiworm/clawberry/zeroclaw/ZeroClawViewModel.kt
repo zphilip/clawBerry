@@ -349,6 +349,11 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
   private val promptCooldownMs = 5000L
   /** True while TTS stream is actively playing; blocks late voice-prompt triggers. */
   @Volatile private var ttsIsActive = false
+  /** Exposed as StateFlow so the UI can show/hide the stop-TTS button. */
+  private val _isTtsPlaying = MutableStateFlow(false)
+  val isTtsPlaying: StateFlow<Boolean> = _isTtsPlaying
+  /** Set by stopTts() to tell the finally block to keep (not delete) the partial cache. */
+  @Volatile private var keepPartialCache = false
   /** True once at least one proxy TTS chunk was seen for the current assistant turn. */
   @Volatile private var sawProxyTtsChunkThisTurn = false
   /** Final assistant text buffered until proxy TTS reaches isFinal=true. */
@@ -615,6 +620,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
           // before the job's first iteration see ttsIsActive=true and
           // skip voice-prompt playback.
           ttsIsActive = true
+          _isTtsPlaying.value = true
           voicePromptJob?.cancel()
           voicePromptJob = null
           kwsTtsPlayer.stopVoicePrompt()
@@ -652,15 +658,11 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
               }
             } finally {
               ttsIsActive = false
+              _isTtsPlaying.value = false
               if (paused) {
                 if (ttsCompleted) {
                   Log.d("ZeroClaw", "[tts] stream complete ($chunkIndex chunks)")
-                } else {
-                  Log.d("ZeroClaw", "[tts] stream interrupted after $chunkIndex chunks")
-                  // ── Clean up partial cache ────────────────────────────
-                  ttsCacheTurnId?.let { ttsCache.deleteTurn(it) }
-                }
-                if (ttsCompleted) {
+                  // ── Finalise turn + cache + associate ──────────────────
                   val finalText = pendingAssistantFinalText
                     ?: _messages.value.lastOrNull { it.role == "assistant" }?.content
                   if (!finalText.isNullOrBlank()) {
@@ -682,8 +684,40 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     mic.setLastAssistantAudioDir(audioDir)
                   }
+                } else if (keepPartialCache) {
+                  // ── User stopped TTS — keep partial cache ──────────────
+                  keepPartialCache = false
+                  Log.d("ZeroClaw", "[tts] user stopped after $chunkIndex chunks — keeping partial cache")
+                  val finalText = pendingAssistantFinalText
+                    ?: _messages.value.lastOrNull { it.role == "assistant" }?.content
+                  if (!finalText.isNullOrBlank()) {
+                    pendingAssistantFinalText = null
+                    mic.onExternalAssistantComplete(finalText)
+                  }
+                  if (chunkIndex > 0) {
+                    ttsCacheDir?.let { d ->
+                      val audioDir = ttsCache.finishTurn(d, chunkIndex)
+                      _messages.update { msgs ->
+                        val lastIdx = msgs.indexOfLast { it.role == "assistant" }
+                        if (lastIdx >= 0) {
+                          msgs.toMutableList().also {
+                            it[lastIdx] = it[lastIdx].copy(cachedAudioDir = audioDir)
+                          }
+                        } else msgs
+                      }
+                      mic.setLastAssistantAudioDir(audioDir)
+                    }
+                  }
+                } else {
+                  Log.d("ZeroClaw", "[tts] stream interrupted after $chunkIndex chunks")
+                  // ── Clean up partial cache ────────────────────────────
+                  ttsCacheTurnId?.let { ttsCache.deleteTurn(it) }
                 }
                 runCatching { mic.resumeAfterTts() }
+              }
+              // Reset flag even when paused=false (stopped before first chunk)
+              if (keepPartialCache) {
+                keepPartialCache = false
               }
               ttsCacheDir = null
               ttsCacheTurnId = null
@@ -759,6 +793,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
         ttsJob?.cancel()
         ttsJob = null
         ttsIsActive = false
+        _isTtsPlaying.value = false
         voicePromptJob?.cancel()
         voicePromptJob = null
         kwsTtsPlayer.stopVoicePrompt()
@@ -864,6 +899,7 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     promptedToolCalls = false
     lastPromptStartedMs = 0L
     ttsIsActive = false
+    _isTtsPlaying.value = false
     // Cancel in-progress cache (new turn starting)
     ttsCacheDir = null
     ttsCacheTurnId = null
@@ -913,6 +949,29 @@ class ZeroClawViewModel(app: Application) : AndroidViewModel(app) {
     webSocket?.close(1000, "User stopped")
     webSocket = null
     openWebSocket()
+  }
+
+  /** Stop TTS playback immediately, keep partial cache for replay, and leave mic active. */
+  fun stopTts() {
+    // 1. Signal the finally block to keep (not delete) the partial cache
+    keepPartialCache = true
+    // 2. Cancel the TTS playback coroutine (finally block handles cleanup)
+    ttsJob?.cancel()
+    ttsJob = null
+    // 3. Drain stale chunks from the channel (non-blocking) so the next
+    //    turn doesn't play them
+    var drained = ttsQueue.tryReceive()
+    while (drained.isSuccess) { drained = ttsQueue.tryReceive() }
+    // 4. Stop proxy audio player immediately (suspending → launch) +
+    //    stop voice prompts synchronously
+    viewModelScope.launch(Dispatchers.IO) { proxyTtsAudioPlayer.stop() }
+    kwsTtsPlayer.stopVoicePrompt()
+    voicePromptJob?.cancel()
+    voicePromptJob = null
+    // 5. Update state
+    ttsIsActive = false
+    sawProxyTtsChunkThisTurn = false
+    _isTtsPlaying.value = false
   }
 
   /** Remove the last assistant response(s) and resend the last user message. */

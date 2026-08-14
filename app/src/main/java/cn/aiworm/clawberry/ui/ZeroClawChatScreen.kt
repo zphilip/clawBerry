@@ -164,6 +164,7 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
     val kwsEnabled by viewModel.kwsEnabled.collectAsState()
     val asrUrl by viewModel.asrUrl.collectAsState()
     val voicePrintRegistered by clawberry.aiworm.cn.voice.SpeakerRegistrationManager.globalIsRegistered.collectAsState()
+    val isTtsPlaying by viewModel.isTtsPlaying.collectAsState()
 
     var activeTab by rememberSaveable { mutableStateOf(ZcTab.Connect) }
 
@@ -253,6 +254,8 @@ fun ZeroClawChatScreen(viewModel: ZeroClawViewModel) {
                         onSetKwsEnabled = viewModel::setKwsEnabled,
                         onSetMicEnabled = { viewModel.setMicEnabled(it) },
                         onReplayAudio = { viewModel.replayTtsAudioDir(it) },
+                        isTtsPlaying = isTtsPlaying,
+                        onStopTts = { viewModel.stopTts() },
                     )
 
                 ZcTab.Settings ->

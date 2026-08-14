@@ -245,6 +245,8 @@
     <string name="openclaw_speaker_muted">已静音</string>
     <string name="openclaw_mic_turn_off">关闭麦克风</string>
     <string name="openclaw_mic_turn_on">开启麦克风</string>
+    <string name="voice_tts_speaking">播放中</string>
+    <string name="voice_tts_stop">停止播放</string>
 
     <!-- Settings – shared actions -->
     <string name="settings_action_grant">授权</string>

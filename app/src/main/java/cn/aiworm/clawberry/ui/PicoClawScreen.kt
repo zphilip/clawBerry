@@ -163,6 +163,7 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
     val voiceTtsHint by viewModel.voiceTtsHint.collectAsState()
     val asrUrl by viewModel.asrUrl.collectAsState()
     val voicePrintRegistered by clawberry.aiworm.cn.voice.SpeakerRegistrationManager.globalIsRegistered.collectAsState()
+    val isTtsPlaying by viewModel.isTtsPlaying.collectAsState()
 
     var activeTab by rememberSaveable { mutableStateOf(PcTab.Connect) }
     val pcTabVoice = stringResource(R.string.common_voice)
@@ -265,6 +266,8 @@ fun PicoClawScreen(viewModel: PicoClawViewModel) {
                         onSetKwsEnabled = viewModel::setKwsEnabled,
                         onSetMicEnabled = viewModel::setMicEnabled,
                         onReplayAudio = { viewModel.replayTtsAudioDir(it) },
+                        isTtsPlaying = isTtsPlaying,
+                        onStopTts = { viewModel.stopTts() },
                     )
                 PcTab.Settings -> PcSettingsTab(
                     host = host,

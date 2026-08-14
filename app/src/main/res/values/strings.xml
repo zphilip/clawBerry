@@ -248,6 +248,8 @@
     <string name="openclaw_speaker_muted">Muted</string>
     <string name="openclaw_mic_turn_off">Turn microphone off</string>
     <string name="openclaw_mic_turn_on">Turn microphone on</string>
+    <string name="voice_tts_speaking">Speaking</string>
+    <string name="voice_tts_stop">Stop speaking</string>
 
     <!-- Settings – shared actions -->
     <string name="settings_action_grant">Grant</string>
