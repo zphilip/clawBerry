@@ -55,7 +55,7 @@ class FunAsrIdentityBackend(
 
     companion object {
         const val BASE_URL = "http://apicn.aiworm.cn:8811"
-        const val DEFAULT_THRESHOLD = 0.25f
+        const val DEFAULT_THRESHOLD = 0.15f
         /** Default no-speech timeout; use a shorter value for KWS sessions. */
         const val SPEECH_TIMEOUT_MS = 20_000L
 
@@ -65,9 +65,12 @@ class FunAsrIdentityBackend(
         private const val AUDIO_STRIDE = 1_920
 
         // Energy-based VAD — lowered for quiet-speech sensitivity
-        private const val SILENCE_THRESHOLD = 80.0       // linear RMS (was 200)
+        private const val SILENCE_THRESHOLD = 40.0       // linear RMS (was 200, then 80)
         private const val SILENCE_FINAL_MS = 1_500L      // ms of silence → end of utterance
         private const val STARTUP_IGNORE_MS = 400L       // ignore energy bursts right after start
+        /** Digital gain applied per-chunk before VAD and storage, so quiet speech
+         *  is amplified for both local detection and server-side recognition. */
+        private const val PRE_VAD_GAIN = 2.0f
     }
 
     @Volatile private var destroyed = false
@@ -187,11 +190,14 @@ class FunAsrIdentityBackend(
             }
             consecutiveReadErrors = 0
 
-            pcmBuffer.write(chunk, 0, read)
+            // Apply pre-VAD gain so quiet speech is amplified for both
+            // local energy detection and the final uploaded audio.
+            val gained = applyGainInPlace(chunk, read, PRE_VAD_GAIN)
+            pcmBuffer.write(gained, 0, read)
 
             val nowMs = System.currentTimeMillis()
             val inStartup = nowMs < startupIgnoreUntilMs
-            val rms = computeLinearRms(chunk, read)
+            val rms = computeLinearRms(gained, read)
 
             // Animate ring
             val level = if (!inStartup && rms >= SILENCE_THRESHOLD) {
@@ -223,10 +229,8 @@ class FunAsrIdentityBackend(
         // Upload to server
         toneOf().startTone(ToneGenerator.TONE_PROP_BEEP2, 220)
         val rawPcm = pcmBuffer.toByteArray()
-        // Apply 2× digital gain before encoding to WAV — compensates for
-        // quiet speech and improves speaker-verification similarity scores.
-        val pcm = applyGain(rawPcm, 2.0f)
-        val wav = pcmToWav(pcm, SAMPLE_RATE)
+        // Per-chunk gain was already applied during capture (PRE_VAD_GAIN).
+        val wav = pcmToWav(rawPcm, SAMPLE_RATE)
 
         val transcript = runCatching {
             val body = MultipartBody.Builder()
@@ -277,20 +281,19 @@ class FunAsrIdentityBackend(
             .also { toneGen = it }
 
     /**
-     * Multiply each 16-bit PCM sample by [factor], clamping to [-32768, 32767].
-     * Returns a new byte array with the same little-endian layout.
+     * Multiply each 16-bit PCM sample in [buf][0..len-1] by [factor] in-place,
+     * clamping to [-32768, 32767]. Returns [buf] for convenience.
      */
-    private fun applyGain(pcm: ByteArray, factor: Float): ByteArray {
-        val out = ByteArray(pcm.size)
+    private fun applyGainInPlace(buf: ByteArray, len: Int, factor: Float): ByteArray {
         var i = 0
-        while (i + 1 < pcm.size) {
-            val s = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort().toInt()
+        while (i + 1 < len) {
+            val s = ((buf[i + 1].toInt() shl 8) or (buf[i].toInt() and 0xFF)).toShort().toInt()
             val gained = (s * factor).toInt().coerceIn(-32768, 32767)
-            out[i] = (gained and 0xFF).toByte()
-            out[i + 1] = ((gained shr 8) and 0xFF).toByte()
+            buf[i] = (gained and 0xFF).toByte()
+            buf[i + 1] = ((gained shr 8) and 0xFF).toByte()
             i += 2
         }
-        return out
+        return buf
     }
 
     private fun computeLinearRms(buf: ByteArray, len: Int): Double {

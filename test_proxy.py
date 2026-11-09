@@ -92,7 +92,8 @@ def on_message(ws, raw):
             print(f"{CYAN}{content}{RESET}", end="", flush=True)
 
         elif typ == "thinking":
-            print(f"{GREY}·{RESET}", end="", flush=True)
+            content = msg.get("content", "")
+            print(f"{GREY}{content}{RESET}", end="", flush=True)
 
         elif typ == "tool_call":
             name = msg.get("name", "")

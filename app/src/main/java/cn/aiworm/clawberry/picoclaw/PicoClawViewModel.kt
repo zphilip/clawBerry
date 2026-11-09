@@ -214,7 +214,7 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
         asrIdentityUserId = {
             if (_useIdentityAsr.value) asrPrefs.getString("node.instanceId", "") ?: "" else ""
         },
-        asrIdentityThreshold = { asrPrefs.getFloat("asr.identityThreshold", 0.45f) },
+        asrIdentityThreshold = { asrPrefs.getFloat("asr.identityThreshold", 0.15f) },
         kws = KwsManager(
             context = app.applicationContext,
             scope = viewModelScope,
@@ -665,11 +665,11 @@ class PicoClawViewModel(app: Application) : AndroidViewModel(app) {
                         try {
                             for (chunk in ttsQueue) {
                                 if (!paused) {
+                                    paused = true
                                     Log.d("PicoClaw", "[tts] stream start — pausing mic")
                                     mic.pauseForTts()
                                     // First chunk initialises the cache directory
                                     ttsCacheDir = ttsCache.beginTurn(turnId, chunk.format ?: "wav")
-                                    paused = true
                                 }
                                 Log.d("PicoClaw", "[tts] playing chunk #${++chunkIndex} isFinal=${chunk.isFinal} format=${chunk.format} b64len=${chunk.audioBase64.length} (~${chunk.audioBase64.length * 3 / 4}B)")
                                 runCatching { proxyTtsAudioPlayer.playRaw(chunk.audioBase64, chunk.format) }
